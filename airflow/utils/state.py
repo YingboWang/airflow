@@ -46,6 +46,8 @@ class State(object):
     UP_FOR_RESCHEDULE = "up_for_reschedule"
     UPSTREAM_FAILED = "upstream_failed"
     SKIPPED = "skipped"
+    SMART_PENDING = "smart_pending"
+    SMART_RUNNING = "smart_running"
 
     task_states = (
         SUCCESS,
@@ -58,6 +60,8 @@ class State(object):
         QUEUED,
         NONE,
         SCHEDULED,
+        SMART_PENDING,
+        SMART_RUNNING,
     )
 
     dag_states = (
@@ -79,6 +83,8 @@ class State(object):
         REMOVED: 'lightgrey',
         SCHEDULED: 'tan',
         NONE: 'lightblue',
+        SMART_PENDING: 'aqua',
+        SMART_RUNNING: 'palegreen',
     }
 
     @classmethod
@@ -118,5 +124,7 @@ class State(object):
             cls.RUNNING,
             cls.SHUTDOWN,
             cls.UP_FOR_RETRY,
-            cls.UP_FOR_RESCHEDULE
+            cls.UP_FOR_RESCHEDULE,
+            cls.SMART_PENDING,
+            cls.SMART_RUNNING,
         ]

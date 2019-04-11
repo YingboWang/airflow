@@ -43,6 +43,7 @@ class HivePartitionSensor(BaseSensorOperator):
     """
     template_fields = ('schema', 'table', 'partition',)
     ui_color = '#C5CAE9'
+    persist_fields = ('schema', 'table', 'partition', 'metastore_conn_id', 'poke_interval')
 
     @apply_defaults
     def __init__(self,

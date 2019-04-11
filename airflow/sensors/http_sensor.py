@@ -54,6 +54,7 @@ class HttpSensor(BaseSensorOperator):
     """
 
     template_fields = ('endpoint', 'request_params')
+    persist_fields = ('endpoint', 'http_conn_id', 'requrest_params', 'headers', 'extra_options', 'response_check')
 
     @apply_defaults
     def __init__(self,

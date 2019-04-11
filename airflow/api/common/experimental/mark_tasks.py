@@ -21,6 +21,7 @@ from sqlalchemy import or_
 
 from airflow.jobs import BackfillJob
 from airflow.models import DagRun, TaskInstance
+from airflow.models.smart_sensor import SensorInstance
 from airflow.operators.subdag_operator import SubDagOperator
 from airflow.utils import timezone
 from airflow.utils.db import provide_session
@@ -301,3 +302,29 @@ def set_dag_run_state_to_running(dag, execution_date, commit=False, session=None
 
     # To keep the return type consistent with the other similar functions.
     return res
+
+@provide_session
+def set_sensor_instance_state(conn_id, schema, table, partition, state, commit=False, session=None):
+    """
+    Set the sensor partition state.
+    :param conn_id:
+    :param schema:
+    :param table:
+    :param partition:
+    :param state:
+    :param commit:
+    :param session:
+    :return:
+    """
+
+    si = session.query(SensorInstance).filter(
+        SensorInstance.conn_id == conn_id,
+        SensorInstance.schema == schema,
+        SensorInstance.table == table,
+        SensorInstance.partition == partition).one()
+
+    si.state = state
+    if commit:
+        session.add(si)
+        session.commit()
+

@@ -954,6 +954,14 @@ class SchedulerJob(BaseJob):
                 if ti.are_dependencies_met(
                         dep_context=DepContext(flag_upstream_failed=True),
                         session=session):
+                    """
+                    ======================Add process sensor code here==================
+                    == Need to persist sensor instance for smart sensor mode
+                    == if dag_id, task_id, execution_date not in dependencies, persist dependencies and sensor instances
+                    == otherwise it implies the sensor is already in DB 
+                    == Consider sensor instance dedupe -- id = getHashcode(class, conn_id, schema, table, partition)
+                    ==  
+                    """
                     self.log.debug('Queuing task: %s', ti)
                     queue.append(ti.key)
 
@@ -1776,7 +1784,13 @@ class SchedulerJob(BaseJob):
                     verbose=True):
                 # Task starts out in the scheduled state. All tasks in the
                 # scheduled state will be sent to the executor
-                ti.state = State.SCHEDULED
+                # =================smart sensor DB persist inserted here================
+                UseSmartSensor = True
+                SmartSensorList = ["NamedHivePartitionSensor"]
+                if UseSmartSensor and ti.operator in SmartSensorList and ti.context:
+                    ti.state = State.SMART_PENDING
+                else:
+                    ti.state = State.SCHEDULED
 
             # Also save this task instance to the DB.
             self.log.info("Creating / updating %s in ORM", ti)

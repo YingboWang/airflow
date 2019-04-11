@@ -56,6 +56,7 @@ class S3KeySensor(BaseSensorOperator):
     :type verify: bool or str
     """
     template_fields = ('bucket_key', 'bucket_name')
+    persist_fields = ('bucket_key', 'bucket_name', 'wildcard_match', 'aws_conn_id', 'verify')
 
     @apply_defaults
     def __init__(self,

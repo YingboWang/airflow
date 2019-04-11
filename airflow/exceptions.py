@@ -47,6 +47,10 @@ class AirflowSensorTimeout(AirflowException):
     pass
 
 
+class AirflowSensorException(AirflowException):
+    pass
+
+
 class AirflowRescheduleException(AirflowException):
     """
     Raise when the task should be re-scheduled at a later time.

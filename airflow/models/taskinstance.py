@@ -25,16 +25,17 @@ import logging
 import os
 import signal
 import time
+import json
 from datetime import timedelta
 from urllib.parse import quote
 
 import dill
-from sqlalchemy import Column, String, Float, Integer, PickleType, Index, func
+from sqlalchemy import Column, String, Float, Integer, Text, PickleType, Index, func
 from sqlalchemy.orm import reconstructor
 
 from airflow import configuration, settings
 from airflow.exceptions import (
-    AirflowException, AirflowTaskTimeout, AirflowSkipException, AirflowRescheduleException
+    AirflowException, AirflowTaskTimeout, AirflowSkipException, AirflowRescheduleException, TaskNotFound
 )
 from airflow.models.base import Base, ID_LEN
 from airflow.models.log import Log
@@ -142,6 +143,7 @@ class TaskInstance(Base, LoggingMixin):
     queued_dttm = Column(UtcDateTime)
     pid = Column(Integer)
     executor_config = Column(PickleType(pickler=dill))
+    attr_dict = Column(Text)  # May need a different name to differentiate with executor context
 
     __table_args__ = (
         Index('ti_dag_state', dag_id, state),
@@ -187,6 +189,17 @@ class TaskInstance(Base, LoggingMixin):
         # Is this TaskInstance being currently running within `airflow run --raw`.
         # Not persisted to the database so only valid for the current process
         self.raw = False
+        # Context is added to track task attributes. Use str and eval for now.
+        # TODO: Followup during test, Use json.dump if that's proven to be more reliable.
+        try:
+            # Consider to only render for sensor tasks so we can reduce some scheduler load.
+            self.render_templates()
+            temp_dict = {field: task.__getattribute__.get(field, None) for field in task.__class__.persist_fields}
+            import yaml
+            self.attr_dict = yaml.safe_dump(temp_dict)
+        except Exception as e:
+            self.log.info(e)
+            self.log.info("Can not get task dictionary.")
 
     @reconstructor
     def init_on_load(self):
