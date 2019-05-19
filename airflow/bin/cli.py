@@ -1668,6 +1668,27 @@ def sync_perm(args):
             dag.access_control)
 
 
+@cli_utils.action_logging
+def smart_sensor(args):
+    print("Testing smart_sensor {}".format(args.operator_class))
+    if args.local:
+        run_job = jobs.SmartSensorJob(
+            operator_class=args.operator_class,
+            pool=args.pool)
+        run_job.run()
+    else:
+        executor = get_default_executor()
+        executor.start()
+        print("Sending to executor.")
+        executor.queue_command(
+            "smart_sensor_task",
+            "airflow smart_sensor {}".format(args.operator_class),
+            100,
+        )
+        executor.heartbeat()
+        executor.end()
+
+
 class Arg(object):
     def __init__(self, flags=None, help=None, action=None, default=None, nargs=None,
                  type=None, choices=None, metavar=None):
@@ -2374,6 +2395,11 @@ class CLIFactory(object):
                     'https://airflow.readthedocs.io/en/stable/howto/secure-connections.html'
                     '#rotating-encryption-keys.',
             'args': (),
+        },
+        {
+            'func': smart_sensor,
+            'help': 'Start a smart sensor instance',
+            'args': ('operator_class', ),
         },
     )
     subparsers_dict = {sp['func'].__name__: sp for sp in subparsers}

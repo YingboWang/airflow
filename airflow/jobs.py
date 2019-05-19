@@ -2684,3 +2684,21 @@ class LocalTaskJob(BaseJob):
             )
             self.task_runner.terminate()
             self.terminating = True
+
+
+class SmartSensorJob(BaseJob):
+    """
+        This SmartSensorJob runs for all sensor jobs coming from same sensor operator.
+        It keeps checking pending and running sensor tasks in metaDB and poke muitiple
+        tasks in one job. For any landed partitoin/data, it mark corresponding sensor
+        task instance as success. If there is any exception/error during poke, the job
+        mark sensor task instance as failed.
+        """
+
+    __mapper_args__ = {
+        'polymorphic_identity': 'SmartSensorJob'
+    }
+
+    def __init__(self, operator_class):
+        self.operator_class = operator_class
+        super(SmartSensorJob, self).__init__(*args, **kwargs)
