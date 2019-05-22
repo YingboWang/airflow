@@ -2689,7 +2689,7 @@ class LocalTaskJob(BaseJob):
 class SmartSensorJob(BaseJob):
     """
         This SmartSensorJob runs for all sensor jobs coming from same sensor operator.
-        It keeps checking pending and running sensor tasks in metaDB and poke muitiple
+        It keeps checking pending and running sensor tasks in metaDB and poke multiples
         tasks in one job. For any landed partitoin/data, it mark corresponding sensor
         task instance as success. If there is any exception/error during poke, the job
         mark sensor task instance as failed.

@@ -27,7 +27,7 @@ from airflow.sensors.base_smart_operator import BaseSmartOperator
 from airflow.models.skipmixin import SkipMixin
 from airflow import models
 from airflow.utils.db import provide_session
-from airflow.sensors.metastore_partition_sensor import MetastorePartitionSensor
+from airflow.sensors.named_hive_partition_sensor import NamedHivePartitionSensor
 from airflow.utils.decorators import apply_defaults
 from airflow.utils.state import State
 from airflow.exceptions import AirflowException, AirflowSensorException
@@ -48,13 +48,14 @@ class SmartMetastorePartitionSensor(BaseSmartOperator, MetastorePartitionSensor)
 
     """
 
-    operator_list = ['HivePartitionSensor', 'NamedHivePartitionSensor']
+    operator_type = NamedHivePartitionSensor
 
     @apply_defaults
     def __init__(self,
                  *args,
                  **kwargs):
-        self.sensor_operator = "MetastorePartitionSensor"
+        self.sensor_operator = "NamedHivePartitionSensor"
+        self.persist_fields = NamedHivePartitionSensor.persist_fields
         self.poke_dict = {}
         self.task_dict = {}
 
@@ -65,11 +66,11 @@ class SmartMetastorePartitionSensor(BaseSmartOperator, MetastorePartitionSensor)
         :param operators:
         :return:
         """
+        # ============Include testing default info. need to cleanup later.===========
         result = {}
         TI = models.TaskInstance
-        tis = session.query(TI).filter(TI.operator == self.sensor_operator,
-                                       TI.state in (State.SMART_PENDING, State.SMART_RUNNING)).all()
-
+        tis = session.query(TI).filter(TI.operator == self.sensor_operator).all()
+        # TI.state in (State.SMART_PENDING, State.SMART_RUNNING)).all()
         default_info = """
                     {partition_names: [datainfra.one_partition_per_day/ds=2019-05-18],
                     metastore_conn_id: metastore_silver} """
@@ -94,81 +95,73 @@ class SmartMetastorePartitionSensor(BaseSmartOperator, MetastorePartitionSensor)
                 session.commit()    # Need to avoid blocking DB for big query. Can Change to use chunk later
         return result
 
-    # @provide_session
-    # def poke(self, context, session=None):
-    #
-    #     TI = models.TaskInstance
-    #     self.poke_dict = self.init_poke_dict()
-    #     # Can either use MetastorePartitionSensor or directly poke from ti.attr_dict
-    #     num_landed = 0
-    #     for (dag_id, task_id, execution_date) in self.poke_dict:
-    #         conn_id, schema, table, partition_name, context = self.poke_dict[(dag_id, task_id, execution_date)]
-    #         single_sensor = MetastorePartitionSensor(table, partition_name, schema, conn_id)
-    #         try:
-    #             landed = single_sensor.poke(context)
-    #             if landed:
-    #                 ti = session.query(TI).filter_by(
-    #                     TI.dag_id == dag_id,
-    #                     TI.task_id == task_id,
-    #                     TI.execution_date == execution_date
-    #                 ).first()
-    #                 ti.state = State.SUCCESS
-    #                 session.merge(ti)
-    #                 session.commit()
-    #                 num_landed += 1
-    #
-    #         except AirflowException:
-    #             self.log.error("SmartSensor poke exception on {} dag_id = {}, task_id = {}, execution_date = {}".
-    #                            format(self.sensor_operator, dag_id, task_id, execution_date))
-    #     return len(self.poke_dict) == num_landed
 
+    @staticmethod
+    def parse_partition_name(partition):
+        first_split = partition.split('.', 1)
+        if len(first_split) == 1:
+            schema = 'default'
+            table_partition = max(first_split)  # poor man first
+        else:
+            schema, table_partition = first_split
+        second_split = table_partition.split('/', 1)
+        if len(second_split) == 1:
+            raise ValueError('Could not parse ' + partition +
+                             'into table, partition')
+        else:
+            table, partition = second_split
+        return schema, table, partition
+
+    def poke_partition(self, hook, partition, conn_id):
+        if not hook:
+            from airflow.hooks.hive_hooks import HiveMetastoreHook
+            hook = HiveMetastoreHook(
+                metastore_conn_id=conn_id)
+
+        schema, table, partition = self.parse_partition_name(partition)
+
+        self.log.info('Poking for %s.%s/%s', schema, table, partition)
+        return hook.check_for_named_partition(
+            schema, table, partition)
 
     @provide_session
     def poke(self, session=None):
 
         poke_dict = self.init_poke_dict()
-        self.log.info("Smart metastore partition sensor detect {} sensor tasks".format(len(poke_dict)))
+        self.log.info("Smart named hive partition sensor detect {} sensor tasks".format(len(poke_dict)))
         TI = models.TaskInstance
         num_landed = 0
 
         for (dag_id, task_id, execution_date) in poke_dict:
-            conn_id, schema, table, partition_name, context = poke_dict[(dag_id, task_id, execution_date)]
-            if '.' in table:
-                schema, table = table.split('.')
-            sql = """
-            SELECT 'X'
-            FROM PARTITIONS A0
-            LEFT OUTER JOIN TBLS B0 ON A0.TBL_ID = B0.TBL_ID
-            LEFT OUTER JOIN DBS C0 ON B0.DB_ID = C0.DB_ID
-            WHERE
-                B0.TBL_NAME = '{table}' AND
-                C0.NAME = '{schema}' AND
-                A0.PART_NAME = '{partition_name}';
-            """.format(table=table, schema=schema, partition_name=partition_name)
+            self.log.info("Processing {} {} {}".format(dag_id, task_id, execution_date))
+            try:
+                context = [c for c in poke_dict[(dag_id, task_id, execution_date)]][0]
+            except Exception as e:
+                self.log.error(e)
+            metastore_conn_id = context.get('metastore_conn_id', 'metastore_silver') #default value only for testing
 
-            conn = BaseHook.get_connection(conn_id)
+            if 'hook' not in context:
+                from airflow.hooks.hive_hooks import HiveMetastoreHook
+                hook = HiveMetastoreHook(
+                    metastore_conn_id=metastore_conn_id)
+            else:
+                hook = context['hook']
 
-            allowed_conn_type = {'google_cloud_platform', 'jdbc', 'mssql',
-                                 'mysql', 'oracle', 'postgres',
-                                 'presto', 'sqlite', 'vertica'}
-            if conn.conn_type not in allowed_conn_type:
-                raise AirflowException("The connection type is not supported by SqlSensor. " +
-                                       "Supported connection types: {}".format(list(allowed_conn_type)))
-            hook = conn.get_hook()
+            partition_names = [
+                partition_name for partition_name in context['partition_names']
+                if not self.poke_partition(hook, partition_name, metastore_conn_id)
+            ]
 
-            self.log.info('Poking: %s (with parameters %s)', self.sql, self.parameters)
-            records = hook.get_records(sql)
-
-            if records and str(records[0][0]) not in ('0', ''):
+            if not partition_names:
                 num_landed += 1
-                ti = session.query(TI).filter_by(
+                ti = session.query(TI).filter(
                     TI.dag_id == dag_id,
                     TI.task_id == task_id,
                     TI.execution_date == execution_date
-                ).first()
+                ).one()
                 ti.state = State.SUCCESS
                 session.merge(ti)
                 session.commit()
+                self.log.info("found {} sensors landed".format(num_landed))
+        self.log.info("Number of landed is {}".format(num_landed))
         return len(poke_dict) == num_landed
-
-
