@@ -60,6 +60,8 @@ from airflow.executors import get_default_executor
 from airflow.models import (
     Connection, DagModel, DagBag, DagPickle, TaskInstance, DagRun, Variable, DAG
 )
+from airflow.models.smartsensorinstance import SmartSensorInstance
+from airflow.sensors.smart_named_hive_partition_sensor import SmartNamedHivePartitionSensor
 from airflow.ti_deps.dep_context import (DepContext, SCHEDULER_DEPS)
 from airflow.utils import cli as cli_utils, db
 from airflow.utils.net import get_hostname
@@ -1671,6 +1673,31 @@ def sync_perm(args):
 @cli_utils.action_logging
 def smart_sensor(args):
     print("Testing smart_sensor {}".format(args.operator_class))
+    # IMPORTANT, have to use the NullPool, otherwise, each "run" command may leave
+    # behind multiple open sleeping connections while heartbeating, which could
+    # easily exceed the database connection limit when
+    # processing hundreds of simultaneous tasks.
+    settings.configure_orm(disable_connection_pool=True)
+
+    task = SmartNamedHivePartitionSensor(task_id='SmartNamedHivePartitionSensor_1')
+    ti = SmartSensorInstance('NamedHivePartitionSensor', task)
+    ti.refresh_from_db()
+
+    ti.init_run_context(raw=args.raw)
+
+    hostname = get_hostname()
+    log.info("Running %s on host %s", ti, hostname)
+
+    if args.interactive:
+        _smart_sensor_run(args, ti)
+    else:
+        with redirect_stdout(ti.log, logging.INFO), redirect_stderr(ti.log, logging.WARN):
+            _smart_sensor_run(args, ti)
+    logging.shutdown()
+
+
+def _smart_sensor_run(args, smart_sensor_instance):
+
     if args.local:
         run_job = jobs.SmartSensorJob(
             operator_class=args.operator_class,
@@ -1680,10 +1707,15 @@ def smart_sensor(args):
         executor = get_default_executor()
         executor.start()
         print("Sending to executor.")
-        executor.queue_command(
-            "smart_sensor_task",
-            "airflow smart_sensor {}".format(args.operator_class),
-            100,
+        executor.queue_smart_sensor_instance(
+            smart_sensor_instance,
+            mark_success=args.mark_success,
+            pickle_id=pickle_id,
+            ignore_all_deps=args.ignore_all_dependencies,
+            ignore_depends_on_past=args.ignore_depends_on_past,
+            ignore_task_deps=args.ignore_dependencies,
+            ignore_ti_state=args.force,
+            pool=args.pool,
         )
         executor.heartbeat()
         executor.end()
@@ -2207,6 +2239,9 @@ class CLIFactory(object):
         'autoscale': Arg(
             ('-a', '--autoscale'),
             help="Minimum and Maximum number of worker to autoscale"),
+        'operator_class': Arg(
+            ('operator_class',),
+            help="Smart sensor operator"),
 
     }
     subparsers = (
@@ -2399,12 +2434,12 @@ class CLIFactory(object):
         {
             'func': smart_sensor,
             'help': 'Start a smart sensor instance',
-            'args': ('operator_class', ),
+            'args': ('operator_class', 'task_id'),
         },
     )
     subparsers_dict = {sp['func'].__name__: sp for sp in subparsers}
     dag_subparsers = (
-        'list_tasks', 'backfill', 'test', 'run', 'pause', 'unpause', 'list_dag_runs')
+        'list_tasks', 'backfill', 'test', 'run', 'pause', 'unpause', 'list_dag_runs', 'smart_sensor')
 
     @classmethod
     def get_parser(cls, dag_parser=False):
@@ -2421,6 +2456,7 @@ class CLIFactory(object):
             for arg in sub['args']:
                 if 'dag_id' in arg and dag_parser:
                     continue
+                print(arg)
                 arg = cls.args[arg]
                 kwargs = {
                     f: v

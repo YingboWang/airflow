@@ -37,7 +37,7 @@ from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm.session import make_transient
 import yaml
 
-class SmartMetastorePartitionSensor(BaseSmartOperator, MetastorePartitionSensor):
+class SmartNamedHivePartitionSensor(BaseSmartOperator):
     """
     A persistent sensor service that talk directly to the Airflow metaDB
     smart-sensor will run like a service and it periodically queries
@@ -52,9 +52,11 @@ class SmartMetastorePartitionSensor(BaseSmartOperator, MetastorePartitionSensor)
 
     @apply_defaults
     def __init__(self,
+                 task_id,
                  *args,
                  **kwargs):
         self.sensor_operator = "NamedHivePartitionSensor"
+        self.task_id = task_id
         self.persist_fields = NamedHivePartitionSensor.persist_fields
         self.poke_dict = {}
         self.task_dict = {}

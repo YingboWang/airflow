@@ -21,7 +21,7 @@ from sqlalchemy import or_
 
 from airflow.jobs import BackfillJob
 from airflow.models import DagRun, TaskInstance
-from airflow.models.smart_sensor import SensorInstance
+from airflow.models.smartsensorinstance import SensorInstance
 from airflow.operators.subdag_operator import SubDagOperator
 from airflow.utils import timezone
 from airflow.utils.db import provide_session

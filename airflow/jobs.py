@@ -2685,20 +2685,126 @@ class LocalTaskJob(BaseJob):
             self.task_runner.terminate()
             self.terminating = True
 
-
 class SmartSensorJob(BaseJob):
-    """
-        This SmartSensorJob runs for all sensor jobs coming from same sensor operator.
-        It keeps checking pending and running sensor tasks in metaDB and poke multiples
-        tasks in one job. For any landed partitoin/data, it mark corresponding sensor
-        task instance as success. If there is any exception/error during poke, the job
-        mark sensor task instance as failed.
-        """
 
     __mapper_args__ = {
         'polymorphic_identity': 'SmartSensorJob'
     }
 
-    def __init__(self, operator_class):
-        self.operator_class = operator_class
+    def __init__(
+            self,
+            task_instance,
+            ignore_all_deps=True,
+            ignore_depends_on_past=True,
+            ignore_task_deps=True,
+            ignore_ti_state=True,
+            mark_success=False,
+            pickle_id=None,
+            pool=None,
+            *args, **kwargs):
+        self.task_instance = task_instance
+        self.ignore_all_deps = ignore_all_deps
+        self.ignore_depends_on_past = ignore_depends_on_past
+        self.ignore_task_deps = ignore_task_deps
+        self.ignore_ti_state = ignore_ti_state
+        self.pool = pool
+        self.pickle_id = pickle_id
+        self.mark_success = mark_success
+
+        # terminating state is used so that a job don't try to
+        # terminate multiple times
+        self.terminating = False
+
         super(SmartSensorJob, self).__init__(*args, **kwargs)
+
+    def _execute(self):
+        self.task_runner = get_task_runner(self)
+
+        def signal_handler(signum, frame):
+            """Setting kill signal handler"""
+            self.log.error("Received SIGTERM. Terminating subprocesses")
+            self.on_kill()
+            raise AirflowException("LocalTaskJob received SIGTERM signal")
+        signal.signal(signal.SIGTERM, signal_handler)
+
+        try:
+            self.task_runner.start()
+
+            last_heartbeat_time = time.time()
+            heartbeat_time_limit = conf.getint('scheduler',
+                                               'scheduler_zombie_smart_sensor_task_threshold')
+            while True:
+                # Monitor the task to see if it's done
+                return_code = self.task_runner.return_code()
+                if return_code is not None:
+                    self.log.info("Task exited with return code %s", return_code)
+                    return
+
+                # Periodically heartbeat so that the scheduler doesn't think this
+                # is a zombie
+                try:
+                    self.heartbeat()
+                    last_heartbeat_time = time.time()
+                except OperationalError:
+                    Stats.incr('local_task_job_heartbeat_failure', 1, 1)
+                    self.log.exception(
+                        "Exception while trying to heartbeat! Sleeping for %s seconds",
+                        self.heartrate
+                    )
+                    time.sleep(self.heartrate)
+
+                # If it's been too long since we've heartbeat, then it's possible that
+                # the scheduler rescheduled this task, so kill launched processes.
+                time_since_last_heartbeat = time.time() - last_heartbeat_time
+                if time_since_last_heartbeat > heartbeat_time_limit:
+                    Stats.incr('local_task_job_prolonged_heartbeat_failure', 1, 1)
+                    self.log.error("Heartbeat time limited exceeded!")
+                    raise AirflowException("Time since last heartbeat({:.2f}s) "
+                                           "exceeded limit ({}s)."
+                                           .format(time_since_last_heartbeat,
+                                                   heartbeat_time_limit))
+        finally:
+            self.on_kill()
+
+    def on_kill(self):
+        self.task_runner.terminate()
+        self.task_runner.on_finish()
+
+    @provide_session
+    def heartbeat_callback(self, session=None):
+        """Self destruct task if state has been moved away from running externally"""
+
+        if self.terminating:
+            # ensure termination if processes are created later
+            self.task_runner.terminate()
+            return
+
+        self.task_instance.refresh_from_db()
+        ti = self.task_instance
+
+        fqdn = get_hostname()
+        same_hostname = fqdn == ti.hostname
+        same_process = ti.pid == os.getpid()
+
+        if ti.state == State.RUNNING:
+            if not same_hostname:
+                self.log.warning("The recorded hostname %s "
+                                 "does not match this instance's hostname "
+                                 "%s", ti.hostname, fqdn)
+                raise AirflowException("Hostname of job runner does not match")
+            elif not same_process:
+                current_pid = os.getpid()
+                self.log.warning("Recorded pid %s does not match "
+                                 "the current pid %s", ti.pid, current_pid)
+                raise AirflowException("PID of job runner does not match")
+        elif (
+                self.task_runner.return_code() is None and
+                hasattr(self.task_runner, 'process')
+        ):
+            self.log.warning(
+                "State of this instance has been externally set to %s. "
+                "Taking the poison pill.",
+                ti.state
+            )
+            self.task_runner.terminate()
+            self.terminating = True
