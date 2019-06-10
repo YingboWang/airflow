@@ -1679,43 +1679,58 @@ def smart_sensor(args):
     # processing hundreds of simultaneous tasks.
     settings.configure_orm(disable_connection_pool=True)
 
-    task = SmartNamedHivePartitionSensor(task_id='SmartNamedHivePartitionSensor_1')
-    ti = SmartSensorInstance('NamedHivePartitionSensor', task)
-    ti.refresh_from_db()
-
-    ti.init_run_context(raw=args.raw)
+    task = SmartNamedHivePartitionSensor(task_id=args.task_id)
+    ssi = SmartSensorInstance('NamedHivePartitionSensor', task)
+    if args.job_id:
+        ssi.job_id = args.job_id
+    # with db.create_session() as session:
+    #     session.add(ssi)
+    #     session.flush()
+    #     print("Insert ssi to DB with id: {}".format(ssi.id))
+    #     session.commit()
+    ssi.refresh_from_db()   # got empty row everytime. the query need to be optimized.
+    print("ssi id: {}, ssi state: {}".format(ssi.id, ssi.state))
+    # ti.init_run_context(raw=args.raw)
 
     hostname = get_hostname()
-    log.info("Running %s on host %s", ti, hostname)
+    log.info("Running %s on host %s", ssi, hostname)
 
-    if args.interactive:
-        _smart_sensor_run(args, ti)
-    else:
-        with redirect_stdout(ti.log, logging.INFO), redirect_stderr(ti.log, logging.WARN):
-            _smart_sensor_run(args, ti)
+    _smart_sensor_run(args, ssi)
+    # if args.interactive:
+    #     _smart_sensor_run(args, ti)
+    # else:
+    #     with redirect_stdout(ti.log, logging.INFO), redirect_stderr(ti.log, logging.WARN):
+    #         _smart_sensor_run(args, ti)
     logging.shutdown()
 
 
 def _smart_sensor_run(args, smart_sensor_instance):
 
-    if args.local:
-        run_job = jobs.SmartSensorJob(
-            operator_class=args.operator_class,
-            pool=args.pool)
+    print("Running _smart_sensor_run with {}".format(smart_sensor_instance.id))
+    if args.local: #args.local:
+        run_job = jobs.SmartSensorJob(smart_sensor_instance)
+            # operator_class=args.operator_class,
+            # pool=args.pool)
+        print(run_job)
         run_job.run()
+    elif args.raw:
+        smart_sensor_instance._run_raw_task(
+            job_id=args.job_id,
+            pool=args.pool,
+        )
     else:
         executor = get_default_executor()
         executor.start()
         print("Sending to executor.")
         executor.queue_smart_sensor_instance(
             smart_sensor_instance,
-            mark_success=args.mark_success,
-            pickle_id=pickle_id,
-            ignore_all_deps=args.ignore_all_dependencies,
-            ignore_depends_on_past=args.ignore_depends_on_past,
-            ignore_task_deps=args.ignore_dependencies,
-            ignore_ti_state=args.force,
-            pool=args.pool,
+            # mark_success=args.mark_success,
+            # pickle_id=pickle_id,
+            # ignore_all_deps=args.ignore_all_dependencies,
+            # ignore_depends_on_past=args.ignore_depends_on_past,
+            # ignore_task_deps=args.ignore_dependencies,
+            # ignore_ti_state=args.force,
+            # pool=args.pool,
         )
         executor.heartbeat()
         executor.end()
@@ -2434,7 +2449,7 @@ class CLIFactory(object):
         {
             'func': smart_sensor,
             'help': 'Start a smart sensor instance',
-            'args': ('operator_class', 'task_id'),
+            'args': ('operator_class', 'task_id', 'mark_success', 'pool', 'local', 'raw', 'job_id',),
         },
     )
     subparsers_dict = {sp['func'].__name__: sp for sp in subparsers}
@@ -2456,7 +2471,6 @@ class CLIFactory(object):
             for arg in sub['args']:
                 if 'dag_id' in arg and dag_parser:
                     continue
-                print(arg)
                 arg = cls.args[arg]
                 kwargs = {
                     f: v

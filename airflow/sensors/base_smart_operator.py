@@ -57,7 +57,6 @@ class BaseSmartOperator(BaseOperator, SkipMixin):
     :type mode: str
     """
     ui_color = '#e6f1f2'
-    # valid_modes = ['poke', 'reschedule'] Smart sensor should not need reschedule mode
 
     @apply_defaults
     def __init__(self,
@@ -81,13 +80,6 @@ class BaseSmartOperator(BaseOperator, SkipMixin):
         if not isinstance(self.timeout, (int, float)) or self.timeout < 0:
             raise AirflowException(
                 "The timeout must be a non-negative number")
-        if self.mode not in self.valid_modes:
-            raise AirflowException(
-                "The mode must be one of {valid_modes},"
-                "'{d}.{t}'; received '{m}'."
-                .format(valid_modes=self.valid_modes,
-                        d=self.dag.dag_id if self.dag else "",
-                        t=self.task_id, m=self.mode))
 
     def init_poke_dict(self):
         """

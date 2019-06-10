@@ -107,12 +107,14 @@ class BaseExecutor(LoggingMixin):
             ignore_ti_state=True,
             pool=None,
             cfg_path=None):
-        pool = pool or task_instance.pool
+        pool = pool or smart_sensor_instance.pool
 
         # TODO (edgarRd): AIRFLOW-1985:
         # cfg_path is needed to propagate the config values if using impersonation
         # (run_as_user), given that there are different code paths running tasks.
         # For a long term solution we need to address AIRFLOW-1986
+
+        print("run command command_as_list")
         command = smart_sensor_instance.command_as_list(
             local=True,
             )

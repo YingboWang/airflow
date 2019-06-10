@@ -741,7 +741,14 @@ class DagFileProcessorManager(LoggingMixin):
         self._zombie_threshold_secs = (
             conf.getint('scheduler', 'scheduler_zombie_task_threshold'))
 
-        self._smart_sensor_check_interval = conf.getint('scheduler', 'smart_sensor_check_interval')
+        if conf.getboolean('cores', 'use_smart_sensor'):
+            self._smart_sensor_check_interval = conf.getint('smart_sensor', 'smart_sensor_check_interval')
+            self._smart_sensor_zombie_threshold_secs = (
+                conf.getint('smart_sensor', 'smart_sensor_zombie_threshold')
+            )
+            # Last time that smartsensor health checked
+            self.last_smart_sensor_check = timezone.utcnow()
+
         # Map from file path to the processor
         self._processors = {}
         # Map from file path to the last runtime
@@ -751,8 +758,6 @@ class DagFileProcessorManager(LoggingMixin):
         self._last_zombie_query_time = timezone.utcnow()
         # Last time that the DAG dir was traversed to look for files
         self.last_dag_dir_refresh_time = timezone.utcnow()
-        # Last time that smartsensor health checked
-        self.last_smart_sensor_check = timezone.utcnow()
         # Last time stats were printed
         self.last_stat_print_time = timezone.datetime(2000, 1, 1)
         # TODO: Remove magic number
@@ -1263,7 +1268,7 @@ class DagFileProcessorManager(LoggingMixin):
                 :return: Zombie task instances in SimpleTaskInstance format.
                 """
         now = timezone.utcnow()
-        zombies = []
+        smart_sensor_zombies = []
         if (now - self.last_smart_sensor_health_check).total_seconds() \
             > self._smart_sensor_check_interval:
             # to avoid circular imports
@@ -1287,9 +1292,12 @@ class DagFileProcessorManager(LoggingMixin):
             )
             self._last_zombie_query_time = timezone.utcnow()
             for ssi in ssis:
-                zombies.append(SimpleTaskInstance(ssi))
+                smart_sensor_zombies.append(SimpleTaskInstance(ssi))
 
-        return zombies
+        if len(smart_sensor_zombies > 0):
+            # ==================kill smart_sensor zombie process and restart
+            pass
+        return smart_sensor_zombies
 
     def max_runs_reached(self):
         """

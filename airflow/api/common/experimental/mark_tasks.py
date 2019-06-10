@@ -21,7 +21,7 @@ from sqlalchemy import or_
 
 from airflow.jobs import BackfillJob
 from airflow.models import DagRun, TaskInstance
-from airflow.models.smartsensorinstance import SensorInstance
+from airflow.models.smartsensorinstance import SmartSensorInstance
 from airflow.operators.subdag_operator import SubDagOperator
 from airflow.utils import timezone
 from airflow.utils.db import provide_session
@@ -317,14 +317,15 @@ def set_sensor_instance_state(conn_id, schema, table, partition, state, commit=F
     :return:
     """
 
-    si = session.query(SensorInstance).filter(
-        SensorInstance.conn_id == conn_id,
-        SensorInstance.schema == schema,
-        SensorInstance.table == table,
-        SensorInstance.partition == partition).one()
-
-    si.state = state
-    if commit:
-        session.add(si)
-        session.commit()
+    pass
+    # si = session.query(SensorInstance).filter(
+    #     SensorInstance.conn_id == conn_id,
+    #     SensorInstance.schema == schema,
+    #     SensorInstance.table == table,
+    #     SensorInstance.partition == partition).one()
+    #
+    # si.state = state
+    # if commit:
+    #     session.add(si)
+    #     session.commit()
 

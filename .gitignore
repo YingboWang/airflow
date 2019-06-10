@@ -158,3 +158,9 @@ airflow-*.pid
 .mypy_cache/
 .dmypy.json
 dmypy.json
+
+# docker
+.dockerignore.bc
+docker_dev_scripts/
+entry.sh
+airflow/www/package-lock.json

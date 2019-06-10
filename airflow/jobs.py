@@ -46,7 +46,7 @@ from airflow import executors, models, settings
 from airflow.exceptions import AirflowException, NoAvailablePoolSlot, PoolNotFound
 from airflow.models import DAG, DagPickle, DagRun, errors, SlaMiss
 from airflow.stats import Stats
-from airflow.task.task_runner import get_task_runner
+from airflow.task.task_runner import get_task_runner, get_smart_sensor_runner
 from airflow.ti_deps.dep_context import DepContext, QUEUE_DEPS, RUN_DEPS
 from airflow.utils import asciiart, helpers, timezone
 from airflow.utils.configuration import tmp_configuration_copy
@@ -954,14 +954,6 @@ class SchedulerJob(BaseJob):
                 if ti.are_dependencies_met(
                         dep_context=DepContext(flag_upstream_failed=True),
                         session=session):
-                    """
-                    ======================Add process sensor code here==================
-                    == Need to persist sensor instance for smart sensor mode
-                    == if dag_id, task_id, execution_date not in dependencies, persist dependencies and sensor instances
-                    == otherwise it implies the sensor is already in DB 
-                    == Consider sensor instance dedupe -- id = getHashcode(class, conn_id, schema, table, partition)
-                    ==  
-                    """
                     self.log.debug('Queuing task: %s', ti)
                     queue.append(ti.key)
 
@@ -1785,9 +1777,8 @@ class SchedulerJob(BaseJob):
                 # Task starts out in the scheduled state. All tasks in the
                 # scheduled state will be sent to the executor
                 # =================smart sensor DB persist inserted here================
-                UseSmartSensor = True
-                SmartSensorList = ["NamedHivePartitionSensor"]
-                if UseSmartSensor and ti.operator in SmartSensorList and ti.context:
+                # SmartSensorList = ["NamedHivePartitionSensor"]
+                if conf.getboolean('cores', 'use_smart_sensor') and ti.operator in SmartSensorList and ti.attr_dict:
                     ti.state = State.SMART_PENDING
                 else:
                     ti.state = State.SCHEDULED
@@ -2693,7 +2684,7 @@ class SmartSensorJob(BaseJob):
 
     def __init__(
             self,
-            task_instance,
+            smart_sensor_instance,
             ignore_all_deps=True,
             ignore_depends_on_past=True,
             ignore_task_deps=True,
@@ -2702,7 +2693,7 @@ class SmartSensorJob(BaseJob):
             pickle_id=None,
             pool=None,
             *args, **kwargs):
-        self.task_instance = task_instance
+        self.smart_sensor_instance = smart_sensor_instance
         self.ignore_all_deps = ignore_all_deps
         self.ignore_depends_on_past = ignore_depends_on_past
         self.ignore_task_deps = ignore_task_deps
@@ -2717,8 +2708,9 @@ class SmartSensorJob(BaseJob):
 
         super(SmartSensorJob, self).__init__(*args, **kwargs)
 
+
     def _execute(self):
-        self.task_runner = get_task_runner(self)
+        self.smart_sensor_runner = get_smart_sensor_runner(self)
 
         def signal_handler(signum, frame):
             """Setting kill signal handler"""
@@ -2727,15 +2719,22 @@ class SmartSensorJob(BaseJob):
             raise AirflowException("LocalTaskJob received SIGTERM signal")
         signal.signal(signal.SIGTERM, signal_handler)
 
+        if not self.smart_sensor_instance._check_and_change_state_before_execution(
+                mark_success=self.mark_success,
+                job_id=self.id,
+                pool=self.pool):
+            self.log.info("Task is not able to be run")
+            return
         try:
-            self.task_runner.start()
+            print("Starting smart sensor runner.")
+            self.smart_sensor_runner.start()
 
             last_heartbeat_time = time.time()
             heartbeat_time_limit = conf.getint('scheduler',
-                                               'scheduler_zombie_smart_sensor_task_threshold')
+                                               'scheduler_zombie_smart_sensor_task_threshold') or 30
             while True:
                 # Monitor the task to see if it's done
-                return_code = self.task_runner.return_code()
+                return_code = self.smart_sensor_runner.return_code()
                 if return_code is not None:
                     self.log.info("Task exited with return code %s", return_code)
                     return
@@ -2767,8 +2766,8 @@ class SmartSensorJob(BaseJob):
             self.on_kill()
 
     def on_kill(self):
-        self.task_runner.terminate()
-        self.task_runner.on_finish()
+        self.smart_sensor_runner.terminate()
+        self.smart_sensor_runner.on_finish()
 
     @provide_session
     def heartbeat_callback(self, session=None):
@@ -2776,35 +2775,35 @@ class SmartSensorJob(BaseJob):
 
         if self.terminating:
             # ensure termination if processes are created later
-            self.task_runner.terminate()
+            self.smart_sensor_runner.terminate()
             return
 
-        self.task_instance.refresh_from_db()
-        ti = self.task_instance
+        self.smart_sensor_instance.refresh_from_db()
+        ssi = self.smart_sensor_instance
 
         fqdn = get_hostname()
-        same_hostname = fqdn == ti.hostname
-        same_process = ti.pid == os.getpid()
+        same_hostname = fqdn == ssi.hostname
+        same_process = ssi.pid == os.getpid()
 
-        if ti.state == State.RUNNING:
+        if ssi.state == State.RUNNING:
             if not same_hostname:
                 self.log.warning("The recorded hostname %s "
                                  "does not match this instance's hostname "
-                                 "%s", ti.hostname, fqdn)
+                                 "%s", ssi.hostname, fqdn)
                 raise AirflowException("Hostname of job runner does not match")
             elif not same_process:
                 current_pid = os.getpid()
                 self.log.warning("Recorded pid %s does not match "
-                                 "the current pid %s", ti.pid, current_pid)
+                                 "the current pid %s", ssi.pid, current_pid)
                 raise AirflowException("PID of job runner does not match")
         elif (
-                self.task_runner.return_code() is None and
-                hasattr(self.task_runner, 'process')
+                self.smart_sensor_runner.return_code() is None and
+                hasattr(self.smart_sensor_runner, 'process')
         ):
             self.log.warning(
                 "State of this instance has been externally set to %s. "
                 "Taking the poison pill.",
-                ti.state
+                ssi.state
             )
-            self.task_runner.terminate()
+            self.smart_sensor_runner.terminate()
             self.terminating = True

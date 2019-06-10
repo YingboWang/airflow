@@ -19,6 +19,8 @@
 
 from airflow import configuration
 from airflow.task.task_runner.standard_task_runner import StandardTaskRunner
+from airflow.task.task_runner.smart_senor_task_runner import BaseSmartSensorRunner
+
 from airflow.exceptions import AirflowException
 
 _TASK_RUNNER = configuration.conf.get('core', 'TASK_RUNNER')
@@ -41,3 +43,17 @@ def get_task_runner(local_task_job):
         return CgroupTaskRunner(local_task_job)
     else:
         raise AirflowException("Unknown task runner type {}".format(_TASK_RUNNER))
+
+def get_smart_sensor_runner(local_smart_sensor_job):
+    """
+    Get the task runner that can be used to run the given job.
+
+    :param local_smart_sensor_job: The LocalSmartSensorJob associated with the SmartSensorInstance
+        that needs to be executed.
+    :type local_smart_sensor_job: airflow.jobs.LocalSmartSensorJob
+    :return: The smart sensor runner to use to run the task.
+    :rtype: airflow.task.smart_sensor_runner.base_smart_sensor_runner.BaseTaskRunner
+    """
+
+    return BaseSmartSensorRunner(local_smart_sensor_job)
+

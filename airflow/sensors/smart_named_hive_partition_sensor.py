@@ -52,11 +52,13 @@ class SmartNamedHivePartitionSensor(BaseSmartOperator):
 
     @apply_defaults
     def __init__(self,
-                 task_id,
+                 # task_id,
                  *args,
                  **kwargs):
+        # self.task_id = task_id
+
+        super(SmartNamedHivePartitionSensor, self).__init__(*args, **kwargs)
         self.sensor_operator = "NamedHivePartitionSensor"
-        self.task_id = task_id
         self.persist_fields = NamedHivePartitionSensor.persist_fields
         self.poke_dict = {}
         self.task_dict = {}
@@ -69,6 +71,7 @@ class SmartNamedHivePartitionSensor(BaseSmartOperator):
         :return:
         """
         # ============Include testing default info. need to cleanup later.===========
+        print("Creating poke dict:")
         result = {}
         TI = models.TaskInstance
         tis = session.query(TI).filter(TI.operator == self.sensor_operator).all()
@@ -95,6 +98,8 @@ class SmartNamedHivePartitionSensor(BaseSmartOperator):
             if ti.state == State.SMART_PENDING:
                 ti.state = State.SMART_RUNNING
                 session.commit()    # Need to avoid blocking DB for big query. Can Change to use chunk later
+
+        print("The dict is : {}".format(str(result)))
         return result
 
 
@@ -128,7 +133,7 @@ class SmartNamedHivePartitionSensor(BaseSmartOperator):
 
     @provide_session
     def poke(self, session=None):
-
+        print("Start to poke...")
         poke_dict = self.init_poke_dict()
         self.log.info("Smart named hive partition sensor detect {} sensor tasks".format(len(poke_dict)))
         TI = models.TaskInstance
