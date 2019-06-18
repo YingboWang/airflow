@@ -741,13 +741,14 @@ class DagFileProcessorManager(LoggingMixin):
         self._zombie_threshold_secs = (
             conf.getint('scheduler', 'scheduler_zombie_task_threshold'))
 
-        if conf.getboolean('cores', 'use_smart_sensor'):
-            self._smart_sensor_check_interval = conf.getint('smart_sensor', 'smart_sensor_check_interval')
-            self._smart_sensor_zombie_threshold_secs = (
-                conf.getint('smart_sensor', 'smart_sensor_zombie_threshold')
-            )
-            # Last time that smartsensor health checked
-            self.last_smart_sensor_check = timezone.utcnow()
+        if conf.has_option('core', 'use_smart_sensor'):
+            if conf.getboolean('core', 'use_smart_sensor'):
+                self._smart_sensor_check_interval = conf.getint('smart_sensor', 'smart_sensor_check_interval')
+                self._smart_sensor_zombie_threshold_secs = (
+                    conf.getint('smart_sensor', 'smart_sensor_zombie_threshold')
+                )
+                # Last time that smartsensor health checked
+                self.last_smart_sensor_check = timezone.utcnow()
 
         # Map from file path to the processor
         self._processors = {}

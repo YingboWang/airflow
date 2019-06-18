@@ -62,6 +62,7 @@ class SmartNamedHivePartitionSensor(BaseSmartOperator):
         self.persist_fields = NamedHivePartitionSensor.persist_fields
         self.poke_dict = {}
         self.task_dict = {}
+        self.failed_dict = {}
 
     @provide_session
     def init_poke_dict(self, session=None):
@@ -99,7 +100,7 @@ class SmartNamedHivePartitionSensor(BaseSmartOperator):
                 ti.state = State.SMART_RUNNING
                 session.commit()    # Need to avoid blocking DB for big query. Can Change to use chunk later
 
-        print("The dict is : {}".format(str(result)))
+        self.log.info("Poke dict is: {}".format(str(result)))
         return result
 
 
@@ -140,35 +141,48 @@ class SmartNamedHivePartitionSensor(BaseSmartOperator):
         num_landed = 0
 
         for (dag_id, task_id, execution_date) in poke_dict:
+
             self.log.info("Processing {} {} {}".format(dag_id, task_id, execution_date))
             try:
                 context = [c for c in poke_dict[(dag_id, task_id, execution_date)]][0]
+                metastore_conn_id = context.get('metastore_conn_id', 'metastore_silver') #default value only for testing
+
+                if 'hook' not in context or context['hook'] is None:
+                    from airflow.hooks.hive_hooks import HiveMetastoreHook
+                    hook = HiveMetastoreHook(
+                        metastore_conn_id=metastore_conn_id)
+                else:
+                    hook = context['hook']
+
+                partition_names = [
+                    partition_name for partition_name in context['partition_names']
+                    if not self.poke_partition(hook, partition_name, metastore_conn_id)
+                ]
+
+                if not partition_names:
+                    num_landed += 1
+                    ti = session.query(TI).filter(
+                        TI.dag_id == dag_id,
+                        TI.task_id == task_id,
+                        TI.execution_date == execution_date
+                    ).one()
+                    ti.state = State.SUCCESS
+                    session.merge(ti)
+                    session.commit()
+                
             except Exception as e:
                 self.log.error(e)
-            metastore_conn_id = context.get('metastore_conn_id', 'metastore_silver') #default value only for testing
+                key = (dag_id, task_id, execution_date)
+                self.failed_dict[key] = self.failed_dict.get(key, 0) + 1
+                if self.failed_dict[key] > 5:
+                    ti = session.query(TI).filter(
+                        TI.dag_id == dag_id,
+                        TI.task_id == task_id,
+                        TI.execution_date == execution_date
+                    ).one()
+                    ti.state = State.FAILED
+                    session.merge(ti)
+                    session.commit()
 
-            if 'hook' not in context:
-                from airflow.hooks.hive_hooks import HiveMetastoreHook
-                hook = HiveMetastoreHook(
-                    metastore_conn_id=metastore_conn_id)
-            else:
-                hook = context['hook']
-
-            partition_names = [
-                partition_name for partition_name in context['partition_names']
-                if not self.poke_partition(hook, partition_name, metastore_conn_id)
-            ]
-
-            if not partition_names:
-                num_landed += 1
-                ti = session.query(TI).filter(
-                    TI.dag_id == dag_id,
-                    TI.task_id == task_id,
-                    TI.execution_date == execution_date
-                ).one()
-                ti.state = State.SUCCESS
-                session.merge(ti)
-                session.commit()
-                self.log.info("found {} sensors landed".format(num_landed))
         self.log.info("Number of landed is {}".format(num_landed))
         return len(poke_dict) == num_landed

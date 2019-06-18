@@ -1777,9 +1777,11 @@ class SchedulerJob(BaseJob):
                 # Task starts out in the scheduled state. All tasks in the
                 # scheduled state will be sent to the executor
                 # =================smart sensor DB persist inserted here================
-                # SmartSensorList = ["NamedHivePartitionSensor"]
-                if conf.getboolean('cores', 'use_smart_sensor') and ti.operator in SmartSensorList and ti.attr_dict:
-                    ti.state = State.SMART_PENDING
+
+                SmartSensorList = ["NamedHivePartitionSensor"]
+                if conf.has_option('core', 'use_smart_sensor') and  conf.getboolean('core', 'use_smart_sensor') \
+                    and task.__class__.__name__ in SmartSensorList and ti.attr_dict:
+                        ti.state = State.SMART_PENDING
                 else:
                     ti.state = State.SCHEDULED
 
@@ -2595,6 +2597,7 @@ class LocalTaskJob(BaseJob):
             return
 
         try:
+            self.log.info("The task state is {}".format(self.task_instance.state))
             self.task_runner.start()
 
             last_heartbeat_time = time.time()

@@ -191,10 +191,12 @@ class TaskInstance(Base, LoggingMixin):
         self.raw = False
         # Context is added to track task attributes. Use str and eval for now.
         # TODO: Followup during test, Use json.dump if that's proven to be more reliable.
+        self.operator = task.__class__.__name__
         try:
             # Consider to only render for sensor tasks so we can reduce some scheduler load.
             self.render_templates()
-            temp_dict = {field: task.__getattribute__.get(field, None) for field in task.__class__.persist_fields}
+            fields = task.__class__.persist_fields if hasattr(task.__class__, 'persist_fields') else {}
+            temp_dict = {field: task.__dict__.get(field, None) for field in fields}
             import yaml
             self.attr_dict = yaml.safe_dump(temp_dict)
         except Exception as e:
