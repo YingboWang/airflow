@@ -30,7 +30,7 @@ from datetime import timedelta
 from urllib.parse import quote
 
 import dill
-from sqlalchemy import Column, String, Float, Integer, Text, PickleType, Index, func
+from sqlalchemy import Column, String, Float, Integer, Text, PickleType, Index, func, BigInteger
 from sqlalchemy.orm import reconstructor
 
 from airflow import configuration, settings
@@ -144,6 +144,7 @@ class TaskInstance(Base, LoggingMixin):
     pid = Column(Integer)
     executor_config = Column(PickleType(pickler=dill))
     attr_dict = Column(Text)  # May need a different name to differentiate with executor context
+    hashcode = Column(BigInteger)
 
     __table_args__ = (
         Index('ti_dag_state', dag_id, state),
@@ -152,6 +153,7 @@ class TaskInstance(Base, LoggingMixin):
         Index('ti_state_lkp', dag_id, task_id, execution_date, state),
         Index('ti_pool', pool, state, priority_weight),
         Index('ti_job_id', job_id),
+        Index('ti_hashcode', hashcode),
     )
 
     def __init__(self, task, execution_date, state=None):
@@ -186,11 +188,7 @@ class TaskInstance(Base, LoggingMixin):
         self.hostname = ''
         self.executor_config = task.executor_config
         self.init_on_load()
-        # Is this TaskInstance being currently running within `airflow run --raw`.
-        # Not persisted to the database so only valid for the current process
-        self.raw = False
-        # Context is added to track task attributes. Use str and eval for now.
-        # TODO: Followup during test, Use json.dump if that's proven to be more reliable.
+        # Prepare information for smart sensor
         self.operator = task.__class__.__name__
         try:
             # Consider to only render for sensor tasks so we can reduce some scheduler load.
@@ -199,9 +197,17 @@ class TaskInstance(Base, LoggingMixin):
             temp_dict = {field: task.__dict__.get(field, None) for field in fields}
             import yaml
             self.attr_dict = yaml.safe_dump(temp_dict)
+            # Use python builtin hash for now, can be replaced by other hash functions later
+            # hashcode is for smart sensor shard and dedup.
+            self.hashcode = hash(self.attr_dict) if self.attr_dict else None
         except Exception as e:
             self.log.info(e)
             self.log.info("Can not get task dictionary.")
+
+        # Is this TaskInstance being currently running within `airflow run --raw`.
+        # Not persisted to the database so only valid for the current process
+
+        self.raw = False
 
     @reconstructor
     def init_on_load(self):

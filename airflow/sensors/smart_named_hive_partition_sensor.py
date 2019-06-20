@@ -30,6 +30,7 @@ from airflow.utils.db import provide_session
 from airflow.sensors.named_hive_partition_sensor import NamedHivePartitionSensor
 from airflow.utils.decorators import apply_defaults
 from airflow.utils.state import State
+from airflow.utils import timezone
 from airflow.exceptions import AirflowException, AirflowSensorException
 from airflow.hooks.base_hook import BaseHook
 from sqlalchemy import (Column, Index, Integer, String, and_, func, not_, or_)
@@ -73,7 +74,7 @@ class SmartNamedHivePartitionSensor(BaseSmartOperator):
         """
         # ============Include testing default info. need to cleanup later.===========
         self.log.info("Creating poke dict:")
-        result = {}
+        task_dict = {}
         TI = models.TaskInstance
         tis = session.query(TI)\
             .filter(TI.operator == self.sensor_operator) \
@@ -84,7 +85,7 @@ class SmartNamedHivePartitionSensor(BaseSmartOperator):
 
         for ti in tis:
             try:
-                persist_info = yaml.load_all(ti.attr_dict)
+                persist_info = yaml.full_load(ti.attr_dict)
 
                 # if conn_id in self.poke_dict:
                 #     self.poke_dict[conn_id][(schema, table, partition_name)] = \
@@ -95,17 +96,19 @@ class SmartNamedHivePartitionSensor(BaseSmartOperator):
                 # else:
                 #     self.poke_dict[conn_id] = {(schema, table, partition_name): "waiting"}
 
-                result[(ti.dag_id, ti.task_id, ti.execution_date)] = persist_info
+                task_dict[(ti.dag_id, ti.task_id, ti.execution_date)] = (persist_info, ti.hashcode)
 
                 # Change task instance state to mention this is picked up by a smart sensor
                 if ti.state == State.SMART_PENDING:
                     ti.state = State.SMART_RUNNING
+                    ti.start_date = timezone.utcnow()
                     session.commit()    # Need to avoid blocking DB for big query. Can Change to use chunk later
+                    self.log.info("Set task {} to smart_running".format(ti.task_id))
             except Exception as e:
                 self.log.info(e)
 
-        self.log.info("Poke dict is: {}".format(str(result)))
-        return result
+        self.log.info("Poke dict is: {}".format(str(task_dict)))
+        return task_dict
 
 
     @staticmethod
@@ -140,26 +143,21 @@ class SmartNamedHivePartitionSensor(BaseSmartOperator):
     def poke(self, session=None):
 
         poke_dict = self.init_poke_dict()
+        poked = {}
         num_landed = 0
 
         self.log.info("Smart named hive partition sensor detect {} sensor tasks".format(len(poke_dict)))
 
         for (dag_id, task_id, execution_date) in poke_dict:
-
-            self.log.info("Processing {} {} {}".format(dag_id, task_id, execution_date))
+            key = (dag_id, task_id, execution_date)
             try:
-                context = [c for c in poke_dict[(dag_id, task_id, execution_date)]][0]
-                metastore_conn_id = context.get('metastore_conn_id', 'metastore_silver') #default value only for testing
+                sensor_context = poke_dict[key][0]
+                hashcode = poke_dict[key][1]
 
-                if 'hook' not in context or context['hook'] is None:
-                    from airflow.hooks.hive_hooks import HiveMetastoreHook
-                    hook = HiveMetastoreHook(
-                        metastore_conn_id=metastore_conn_id)
-                else:
-                    hook = context['hook']
-
+                metastore_conn_id = sensor_context.get('metastore_conn_id')
+                hook = sensor_context.get('hook', None)
                 partition_names = [
-                    partition_name for partition_name in context['partition_names']
+                    partition_name for partition_name in sensor_context['partition_names']
                     if not self.poke_partition(hook, partition_name, metastore_conn_id)
                 ]
 
@@ -167,12 +165,16 @@ class SmartNamedHivePartitionSensor(BaseSmartOperator):
                     num_landed += 1
                     self.set_state(dag_id, task_id, execution_date, State.SUCCESS)
 
+                
             except Exception as e:
                 self.log.error(e)
                 key = (dag_id, task_id, execution_date)
                 self.failed_dict[key] = self.failed_dict.get(key, 0) + 1
-                if self.failed_dict[key] > 1:
-                    self.set_state(dag_id, task_id,execution_date, State.FAILED)
+                if self.failed_dict[key] > max(3, sensor_context.get('retries')):
+                    self.set_state(dag_id, task_id, execution_date, State.FAILED)
+                    if sensor_context.get('soft_fail'):
+                        # Handle soft fail
+                        pass
 
         self.log.info("Number of landed is {}".format(num_landed))
         return len(poke_dict) == num_landed

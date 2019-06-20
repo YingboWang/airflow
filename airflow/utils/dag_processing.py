@@ -1262,44 +1262,6 @@ class DagFileProcessorManager(LoggingMixin):
 
         return zombies
 
-    @provide_session
-    def _health_check_smart_sensor(self, session):
-        """
-                Find zombie smart sensor instances, which are tasks haven't heartbeated for too long.
-                :return: Zombie task instances in SimpleTaskInstance format.
-                """
-        now = timezone.utcnow()
-        smart_sensor_zombies = []
-        if (now - self.last_smart_sensor_health_check).total_seconds() \
-            > self._smart_sensor_check_interval:
-            # to avoid circular imports
-            from airflow.jobs import SmartSensorJob as SSJ
-            self.log.info("Finding 'running' jobs without a recent heartbeat")
-            SSI = airflow.models.SmartSensorInstance
-            limit_dttm = timezone.utcnow() - timedelta(
-                seconds=self._zombie_threshold_secs)
-            self.log.info("Failing jobs without heartbeat after %s", limit_dttm)
-
-            ssis = (
-                session.query(SSI)
-                    .join(SSJ, SSI.job_id == SSJ.id)
-                    .filter(SSI.state == State.RUNNING)
-                    .filter(
-                    or_(
-                        SSJ.state != State.RUNNING,
-                        SSJ.latest_heartbeat < limit_dttm,
-                    )
-                ).all()
-            )
-            self._last_zombie_query_time = timezone.utcnow()
-            for ssi in ssis:
-                smart_sensor_zombies.append(SimpleTaskInstance(ssi))
-
-        if len(smart_sensor_zombies > 0):
-            # ==================kill smart_sensor zombie process and restart
-            pass
-        return smart_sensor_zombies
-
     def max_runs_reached(self):
         """
         :return: whether all file paths have been processed max_runs times

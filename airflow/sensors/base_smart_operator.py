@@ -44,17 +44,6 @@ class BaseSmartOperator(BaseOperator, SkipMixin):
     :type poke_interval: int
     :param timeout: Time, in seconds before the task times out and fails.
     :type timeout: int
-    :param mode: How the sensor operates.
-        Options are: ``{ poke | reschedule }``, default is ``poke``.
-        When set to ``poke`` the sensor is taking up a worker slot for its
-        whole execution time and sleeps between pokes. Use this mode if the
-        expected runtime of the sensor is short or if a short poke interval
-        is required.
-        When set to ``reschedule`` the sensor task frees the worker slot when
-        the criteria is not yet met and it's rescheduled at a later time. Use
-        this mode if the expected time until the criteria is met is. The poke
-        interval should be more than one minute to prevent too much load on
-        the scheduler.
     :type mode: str
     """
     ui_color = '#e6f1f2'
@@ -64,14 +53,12 @@ class BaseSmartOperator(BaseOperator, SkipMixin):
                  poke_interval=60,
                  timeout=60 * 60 * 24 * 7,
                  soft_fail=False,
-                 # mode='poke',
                  *args,
                  **kwargs):
         super(BaseSmartOperator, self).__init__(*args, **kwargs)
         self.poke_interval = poke_interval
         self.soft_fail = soft_fail
         self.timeout = timeout
-        # self.mode = mode
         self._validate_input_values()
 
     def _validate_input_values(self):
@@ -104,12 +91,13 @@ class BaseSmartOperator(BaseOperator, SkipMixin):
             TI.task_id == task_id,
             TI.execution_date == execution_date
         ).one()
-        if ti:
-            ti.set_state(state)
+        if ti and ti.state != state:
+            ti.state = state
+            ti.end_date = timezone.utcnow()
             session.merge(ti)
             session.commit()
         else:
-            raise AirflowException("The task instance need to be set can not be found")
+            self.log.warning("The task instance need to be set can not be found")
 
     def execute(self, context):
         started_at = timezone.utcnow()
@@ -128,6 +116,8 @@ class BaseSmartOperator(BaseOperator, SkipMixin):
         self.log.info("Success criteria met. Exiting.")
 
     def _do_skip_downstream_tasks(self, context):
+        # This function is not called in current smart sensor but related to soft_fail handle.
+        # todo: refactor to handle soft_fail in smart sensor. Keep it for now as reminder
         downstream_tasks = context['task'].get_flat_relatives(upstream=False)
         self.log.debug("Downstream task_ids %s", downstream_tasks)
         if downstream_tasks:

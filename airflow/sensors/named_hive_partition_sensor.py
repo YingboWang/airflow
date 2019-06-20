@@ -42,7 +42,7 @@ class NamedHivePartitionSensor(BaseSensorOperator):
 
     template_fields = ('partition_names',)
     ui_color = '#8d99ae'
-    persist_fields = ('partition_names', 'metastore_conn_id', 'poke_interval', 'hook')
+    persist_fields = ('partition_names', 'metastore_conn_id', 'poke_interval', 'hook', 'retries', 'soft_fail')
 
     @apply_defaults
     def __init__(self,

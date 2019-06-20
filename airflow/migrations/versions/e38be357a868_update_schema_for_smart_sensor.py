@@ -37,27 +37,13 @@ depends_on = None
 
 def upgrade():
     op.add_column('task_instance', sa.Column('attr_dict', sa.Text(), nullable=True))
-    op.create_table('smart_sensor_instance',
-                    sa.Column('id', sa.Integer(), autoincrement=True, nullable=False),
-                    sa.Column('item_hash', sa.String(length=2000), nullable=True),
-                    sa.Column('smart_sensor_id', sa.String(length=250), nullable=False),
-                        sa.Column('start_date', sa.DATETIME(timezone=True)),
-                        sa.Column('end_date', sa.DATETIME(timezone=True)),
-                        sa.Column('duration', sa.Float),
-                        sa.Column('state', sa.String(length=20)),
-                        sa.Column('hostname', sa.String(length=1000)),
-                        sa.Column('unixname', sa.String(length=1000)),
-                        sa.Column('job_id', sa.Integer),
-                        sa.Column('pool', sa.String(length=50)),
-                        sa.Column('queue', sa.String(length=50)),
-                        sa.Column('priority_weight', sa.Integer),
-                        sa.Column('operator', sa.String(length=1000)),
-                        sa.Column('queued_dttm', sa.DATETIME(timezone=True)),
-                    sa.Column('pid', sa.Integer),
-                    sa.Column('executor_config', sa.PickleType(pickler=dill)),
-                    sa.PrimaryKeyConstraint('id'))
+    op.add_column('task_instance', sa.Column('hashcode', sa.BigInteger(), nullable=True))
+    op.create_index('ti_hashcode', 'task_instance', ['hashcode'], unique=False)
 
 
 def downgrade():
-    op.drop_column('task_instance', 'context')
-    op.drop_table('smart_sensor_instance')
+    op.drop_index('ti_hashcode', table_name='task_instance')
+
+    op.drop_column('task_instance', 'attr_dict')
+    op.drop_column('task_instance', 'hashcode')
+
