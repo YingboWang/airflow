@@ -965,6 +965,9 @@ class BaseOperator(LoggingMixin):
         if link_name in self.operator_extra_link_dict:
             return self.operator_extra_link_dict[link_name].get_link(self, dttm)
 
+    def can_use_smart_sensor(self):
+        return False
+
 
 class BaseOperatorLink:
     """

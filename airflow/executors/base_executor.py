@@ -54,8 +54,6 @@ class BaseExecutor(LoggingMixin):
         pass
 
     def queue_command(self, simple_task_instance, command, priority=1, queue=None):
-        # =======Include smartsensor as special task instance. simple_task_instance can either be a
-        # =======SimpleTaskInstance object or SmartSensorInstance object
         key = simple_task_instance.key
         if key not in self.queued_tasks and key not in self.running:
             self.log.info("Adding to queue: %s", command)
@@ -95,35 +93,6 @@ class BaseExecutor(LoggingMixin):
             command,
             priority=task_instance.task.priority_weight_total,
             queue=task_instance.task.queue)
-
-    def queue_smart_sensor_instance(
-            self,
-            smart_sensor_instance,
-            mark_success=False,
-            pickle_id=None,
-            ignore_all_deps=True,
-            ignore_depends_on_past=True,
-            ignore_task_deps=True,
-            ignore_ti_state=True,
-            pool=None,
-            cfg_path=None):
-        pool = pool or smart_sensor_instance.pool
-
-        # TODO (edgarRd): AIRFLOW-1985:
-        # cfg_path is needed to propagate the config values if using impersonation
-        # (run_as_user), given that there are different code paths running tasks.
-        # For a long term solution we need to address AIRFLOW-1986
-
-        print("run command command_as_list")
-        command = smart_sensor_instance.command_as_list(
-            local=True,
-            )
-        self.queue_command(
-            airflow.utils.dag_processing.SimpleTaskInstance(smart_sensor_instance),
-            command,
-            priority=smart_sensor_instance.task.priority_weight_total,
-            queue=smart_sensor_instance.task.queue)
-
 
     def has_task(self, task_instance):
         """

@@ -1381,3 +1381,6 @@ class TaskInstance(Base, LoggingMixin):
         """
         self.raw = raw
         self._set_context(self)
+
+    def can_use_smart_sensor(self):
+        return self.task.can_use_smart_sensor() if self.attr_dict else False

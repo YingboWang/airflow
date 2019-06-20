@@ -60,8 +60,6 @@ from airflow.executors import get_default_executor
 from airflow.models import (
     Connection, DagModel, DagBag, DagPickle, TaskInstance, DagRun, Variable, DAG
 )
-from airflow.models.smartsensorinstance import SmartSensorInstance
-from airflow.sensors.smart_named_hive_partition_sensor import SmartNamedHivePartitionSensor
 from airflow.ti_deps.dep_context import (DepContext, SCHEDULER_DEPS)
 from airflow.utils import cli as cli_utils, db
 from airflow.utils.net import get_hostname
@@ -1670,72 +1668,6 @@ def sync_perm(args):
             dag.access_control)
 
 
-@cli_utils.action_logging
-def smart_sensor(args):
-    print("Testing smart_sensor {}".format(args.operator_class))
-    # IMPORTANT, have to use the NullPool, otherwise, each "run" command may leave
-    # behind multiple open sleeping connections while heartbeating, which could
-    # easily exceed the database connection limit when
-    # processing hundreds of simultaneous tasks.
-    settings.configure_orm(disable_connection_pool=True)
-
-    task = SmartNamedHivePartitionSensor(task_id=args.task_id)
-    ssi = SmartSensorInstance('NamedHivePartitionSensor', task)
-    if args.job_id:
-        ssi.job_id = args.job_id
-    # with db.create_session() as session:
-    #     session.add(ssi)
-    #     session.flush()
-    #     print("Insert ssi to DB with id: {}".format(ssi.id))
-    #     session.commit()
-    ssi.refresh_from_db()   # got empty row everytime. the query need to be optimized.
-    print("ssi id: {}, ssi state: {}".format(ssi.id, ssi.state))
-    # ti.init_run_context(raw=args.raw)
-
-    hostname = get_hostname()
-    log.info("Running %s on host %s", ssi, hostname)
-
-    _smart_sensor_run(args, ssi)
-    # if args.interactive:
-    #     _smart_sensor_run(args, ti)
-    # else:
-    #     with redirect_stdout(ti.log, logging.INFO), redirect_stderr(ti.log, logging.WARN):
-    #         _smart_sensor_run(args, ti)
-    logging.shutdown()
-
-
-def _smart_sensor_run(args, smart_sensor_instance):
-
-    print("Running _smart_sensor_run with {}".format(smart_sensor_instance.id))
-    if args.local: #args.local:
-        run_job = jobs.SmartSensorJob(smart_sensor_instance)
-            # operator_class=args.operator_class,
-            # pool=args.pool)
-        print(run_job)
-        run_job.run()
-    elif args.raw:
-        smart_sensor_instance._run_raw_task(
-            job_id=args.job_id,
-            pool=args.pool,
-        )
-    else:
-        executor = get_default_executor()
-        executor.start()
-        print("Sending to executor.")
-        executor.queue_smart_sensor_instance(
-            smart_sensor_instance,
-            # mark_success=args.mark_success,
-            # pickle_id=pickle_id,
-            # ignore_all_deps=args.ignore_all_dependencies,
-            # ignore_depends_on_past=args.ignore_depends_on_past,
-            # ignore_task_deps=args.ignore_dependencies,
-            # ignore_ti_state=args.force,
-            # pool=args.pool,
-        )
-        executor.heartbeat()
-        executor.end()
-
-
 class Arg(object):
     def __init__(self, flags=None, help=None, action=None, default=None, nargs=None,
                  type=None, choices=None, metavar=None):
@@ -2254,9 +2186,6 @@ class CLIFactory(object):
         'autoscale': Arg(
             ('-a', '--autoscale'),
             help="Minimum and Maximum number of worker to autoscale"),
-        'operator_class': Arg(
-            ('operator_class',),
-            help="Smart sensor operator"),
 
     }
     subparsers = (
@@ -2446,15 +2375,10 @@ class CLIFactory(object):
                     '#rotating-encryption-keys.',
             'args': (),
         },
-        {
-            'func': smart_sensor,
-            'help': 'Start a smart sensor instance',
-            'args': ('operator_class', 'task_id', 'mark_success', 'pool', 'local', 'raw', 'job_id',),
-        },
     )
     subparsers_dict = {sp['func'].__name__: sp for sp in subparsers}
     dag_subparsers = (
-        'list_tasks', 'backfill', 'test', 'run', 'pause', 'unpause', 'list_dag_runs', 'smart_sensor')
+        'list_tasks', 'backfill', 'test', 'run', 'pause', 'unpause', 'list_dag_runs')
 
     @classmethod
     def get_parser(cls, dag_parser=False):

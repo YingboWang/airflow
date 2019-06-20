@@ -138,3 +138,6 @@ class BaseSensorOperator(BaseOperator, SkipMixin):
         checks if a sensor task instance can be rescheduled.
         """
         return BaseOperator.deps.fget(self) | {ReadyToRescheduleDep()}
+
+    def can_use_smart_sensor(self):
+        return False

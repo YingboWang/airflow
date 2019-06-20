@@ -23,10 +23,11 @@ from datetime import timedelta
 
 from airflow.exceptions import AirflowException, AirflowSensorTimeout, \
     AirflowSkipException, AirflowRescheduleException
-from airflow.models import BaseOperator
+from airflow.models import BaseOperator, TaskInstance
 from airflow.models.skipmixin import SkipMixin
 from airflow.utils import timezone
 from airflow.utils.decorators import apply_defaults
+from airflow.utils.db import provide_session
 
 
 class BaseSmartOperator(BaseOperator, SkipMixin):
@@ -94,6 +95,21 @@ class BaseSmartOperator(BaseOperator, SkipMixin):
         override.
         """
         raise AirflowException('Override me.')
+
+    @provide_session
+    def set_state(self, dag_id, task_id, execution_date, state, session=None):
+        TI = TaskInstance
+        ti = session.query(TI).filter(
+            TI.dag_id == dag_id,
+            TI.task_id == task_id,
+            TI.execution_date == execution_date
+        ).one()
+        if ti:
+            ti.set_state(state)
+            session.merge(ti)
+            session.commit()
+        else:
+            raise AirflowException("The task instance need to be set can not be found")
 
     def execute(self, context):
         started_at = timezone.utcnow()

@@ -72,33 +72,37 @@ class SmartNamedHivePartitionSensor(BaseSmartOperator):
         :return:
         """
         # ============Include testing default info. need to cleanup later.===========
-        print("Creating poke dict:")
+        self.log.info("Creating poke dict:")
         result = {}
         TI = models.TaskInstance
-        tis = session.query(TI).filter(TI.operator == self.sensor_operator).all()
-        # TI.state in (State.SMART_PENDING, State.SMART_RUNNING)).all()
-        default_info = """
-                    {partition_names: [datainfra.one_partition_per_day/ds=2019-05-18],
-                    metastore_conn_id: metastore_silver} """
+        tis = session.query(TI)\
+            .filter(TI.operator == self.sensor_operator) \
+            .filter(or_(
+            TI.state == State.SMART_RUNNING,
+            TI.state == State.SMART_PENDING))\
+            .all()
+
         for ti in tis:
-            persist_info = yaml.load_all(ti.attr_dict) if ti.attr_dict \
-                else yaml.load_all(default_info)
+            try:
+                persist_info = yaml.load_all(ti.attr_dict)
 
-            # if conn_id in self.poke_dict:
-            #     self.poke_dict[conn_id][(schema, table, partition_name)] = \
-            #         self.poke_dict[conn_id].get((schema, table, partition_name), "waiting")
-            #
-            #     self.task_dict[(conn_id, schema, table, partition_name)][-1]\
-            #         .append((ti.dag_id, ti.task_id, ti.execution_date))
-            # else:
-            #     self.poke_dict[conn_id] = {(schema, table, partition_name): "waiting"}
+                # if conn_id in self.poke_dict:
+                #     self.poke_dict[conn_id][(schema, table, partition_name)] = \
+                #         self.poke_dict[conn_id].get((schema, table, partition_name), "waiting")
+                #
+                #     self.task_dict[(conn_id, schema, table, partition_name)][-1]\
+                #         .append((ti.dag_id, ti.task_id, ti.execution_date))
+                # else:
+                #     self.poke_dict[conn_id] = {(schema, table, partition_name): "waiting"}
 
-            result[(ti.dag_id, ti.task_id, ti.execution_date)] = persist_info
+                result[(ti.dag_id, ti.task_id, ti.execution_date)] = persist_info
 
-            # Change task instance state to mention this is picked up by a smart sensor
-            if ti.state == State.SMART_PENDING:
-                ti.state = State.SMART_RUNNING
-                session.commit()    # Need to avoid blocking DB for big query. Can Change to use chunk later
+                # Change task instance state to mention this is picked up by a smart sensor
+                if ti.state == State.SMART_PENDING:
+                    ti.state = State.SMART_RUNNING
+                    session.commit()    # Need to avoid blocking DB for big query. Can Change to use chunk later
+            except Exception as e:
+                self.log.info(e)
 
         self.log.info("Poke dict is: {}".format(str(result)))
         return result
@@ -134,11 +138,11 @@ class SmartNamedHivePartitionSensor(BaseSmartOperator):
 
     @provide_session
     def poke(self, session=None):
-        print("Start to poke...")
+
         poke_dict = self.init_poke_dict()
-        self.log.info("Smart named hive partition sensor detect {} sensor tasks".format(len(poke_dict)))
-        TI = models.TaskInstance
         num_landed = 0
+
+        self.log.info("Smart named hive partition sensor detect {} sensor tasks".format(len(poke_dict)))
 
         for (dag_id, task_id, execution_date) in poke_dict:
 
@@ -161,28 +165,14 @@ class SmartNamedHivePartitionSensor(BaseSmartOperator):
 
                 if not partition_names:
                     num_landed += 1
-                    ti = session.query(TI).filter(
-                        TI.dag_id == dag_id,
-                        TI.task_id == task_id,
-                        TI.execution_date == execution_date
-                    ).one()
-                    ti.state = State.SUCCESS
-                    session.merge(ti)
-                    session.commit()
-                
+                    self.set_state(dag_id, task_id, execution_date, State.SUCCESS)
+
             except Exception as e:
                 self.log.error(e)
                 key = (dag_id, task_id, execution_date)
                 self.failed_dict[key] = self.failed_dict.get(key, 0) + 1
-                if self.failed_dict[key] > 5:
-                    ti = session.query(TI).filter(
-                        TI.dag_id == dag_id,
-                        TI.task_id == task_id,
-                        TI.execution_date == execution_date
-                    ).one()
-                    ti.state = State.FAILED
-                    session.merge(ti)
-                    session.commit()
+                if self.failed_dict[key] > 1:
+                    self.set_state(dag_id, task_id,execution_date, State.FAILED)
 
         self.log.info("Number of landed is {}".format(num_landed))
         return len(poke_dict) == num_landed

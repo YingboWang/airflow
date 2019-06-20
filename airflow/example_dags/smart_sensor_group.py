@@ -37,18 +37,12 @@ dag = DAG(
     dagrun_timeout=timedelta(minutes=60),
 )
 
-run_this_last = DummyOperator(
-    task_id='run_this_last',
-    dag=dag,
-)
-
 num_smart_sensor_shard = 1
 for i in range(num_smart_sensor_shard):
     task = SmartNamedHivePartitionSensor(
         task_id='smart_named_hive_partition_sensor_' + str(i),
         dag=dag,
     )
-    # task >> run_this_last
 
 if __name__ == "__main__":
     dag.cli()
