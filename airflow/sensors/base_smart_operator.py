@@ -28,6 +28,9 @@ from airflow.models.skipmixin import SkipMixin
 from airflow.utils import timezone
 from airflow.utils.decorators import apply_defaults
 from airflow.utils.db import provide_session
+from sqlalchemy import (Column, Index, Integer, String, and_, func, not_, or_)
+from airflow.utils.state import State
+import yaml
 
 
 class BaseSmartOperator(BaseOperator, SkipMixin):
@@ -60,6 +63,11 @@ class BaseSmartOperator(BaseOperator, SkipMixin):
         self.soft_fail = soft_fail
         self.timeout = timeout
         self._validate_input_values()
+        self.task_dict = {}
+        self.poked_dict = {}
+        self.failed_hash_dict = {}
+        self.clear_set = set()
+        self.max_tis_per_query = 50
 
     def _validate_input_values(self):
         if not isinstance(self.poke_interval, (int, float)) or self.poke_interval < 0:
@@ -69,19 +77,81 @@ class BaseSmartOperator(BaseOperator, SkipMixin):
             raise AirflowException(
                 "The timeout must be a non-negative number")
 
-    def init_poke_dict(self):
+    @provide_session
+    def refresh_task_dict(self, session=None):
         """
         Init poke dictionary. Function that the sensors defined while deriving this class should
         override.
         """
-        raise AirflowException('Override me.')
+        self.log.info("Creating poke dict:")
+        task_dict = {}
+        TI = TaskInstance
+        tis = session.query(TI) \
+            .filter(TI.operator == self.sensor_operator) \
+            .filter(or_(
+            TI.state == State.SMART_RUNNING,
+            TI.state == State.SMART_PENDING)) \
+            .all()
 
-    def poke(self, context):
+        for ti in tis:
+            try:
+                task_dict[(ti.dag_id, ti.task_id, ti.execution_date)] = \
+                    (yaml.full_load(ti.attr_dict), ti.hashcode)
+
+                # Change task instance state to mention this is picked up by a smart sensor
+                if ti.state == State.SMART_PENDING:
+                    ti.state = State.SMART_RUNNING
+                    ti.start_date = timezone.utcnow()
+                    session.commit()  # Need to avoid blocking DB for big query. Can Change to use chunk later
+                    self.log.info("Set task {} to smart_running".format(ti.task_id))
+            except Exception as e:
+                self.log.info(e)
+
+        self.log.info("Poke dict is: {}".format(str(task_dict)))
+        return task_dict
+
+    def refresh_all_dict(self):
+        self.task_dict = self.refresh_task_dict()
+        self.poked_dict = {}
+        for item in self.clear_set:
+            try:
+                del self.failedd_hash_dict[item]
+            except KeyError:
+                pass
+        self.clear_set = set()
+
+    def poke(self, poke_context):
         """
         Function that the sensors defined while deriving this class should
         override.
         """
         raise AirflowException('Override me.')
+
+    @provide_session
+    def mark_state(self, poke_hash, state, session=None):
+        TI = TaskInstance
+        tis = session.query(TI)\
+            .filter(TI.hashcode == poke_hash,
+                    TI.operator == self.sensor_operator)\
+            .filter(or_(TI.state == State.SMART_RUNNING,
+                        TI.state == State.SMART_PENDING))\
+            .all()
+        self.log.info("Found {} tasks for hashcode {}".format(len(tis), poke_hash))
+        chunks = [tis[i: i + self.max_tis_per_query] for i in range(0, len(tis), self.max_tis_per_query)]
+
+        for chunk in chunks:
+            try:
+                end_date = timezone.utcnow()
+                for ti in chunk:
+                    ti.state = state
+                    ti.end_date = end_date
+                    session.merge(ti)
+                session.commit()
+                self.log.info("Mark state for {}, {}, {} to {}".format(ti.dag_id, ti.task_id,ti.execution_date, state))
+            except Exception as e:
+                self.logger.exception("Exception mark_state in smart sensor: {}, hashcode: {}" \
+                                      .format(str(e), poke_hash))
+        self.log.info("Mark {} task to state {}".format(len(tis), state))
 
     @provide_session
     def set_state(self, dag_id, task_id, execution_date, state, session=None):
@@ -101,7 +171,8 @@ class BaseSmartOperator(BaseOperator, SkipMixin):
 
     def execute(self, context):
         started_at = timezone.utcnow()
-        while not self.poke():
+        # while (timezone.utcnow() - started_at).total_seconds() > self.timeout:
+        while True:
             if (timezone.utcnow() - started_at).total_seconds() > self.timeout:
                 # If sensor is in soft fail mode but will be retried then
                 # give it a chance and fail with timeout.
@@ -111,9 +182,34 @@ class BaseSmartOperator(BaseOperator, SkipMixin):
                     raise AirflowSkipException('Snap. Time is OUT.')
                 else:
                     raise AirflowSensorTimeout('Snap. Time is OUT.')
-            else:
-                sleep(self.poke_interval)
-        self.log.info("Success criteria met. Exiting.")
+
+            self.log.info("Refresh all dict for smart sensor")
+            self.refresh_all_dict()
+
+            for key in self.task_dict:
+                poke_context, poke_hash = self.task_dict[key]
+                if poke_hash in self.poked_dict:
+                    continue
+
+                try:
+                    if self.poke(poke_context):
+
+                        self.poked_dict[poke_hash] = 0
+                        self.mark_state(poke_hash, State.SUCCESS)
+                    else:
+                        self.poked_dict[poke_hash] = 1
+                except Exception as e:
+                    self.log.info(e)
+                    self.poked_dict[poke_hash] = 2
+                    self.failed_hash_dict[poke_hash] = self.failed_hash_dict.get(poke_hash, 0) + 1
+                    if self.failed_hash_dict[poke_hash] > max(3, poke_context.get('retries', 0)):
+                        self.mark_state(poke_hash, State.FAILED)
+                        self.clear_set.add(poke_hash)
+                        self.log.info("Add {} to clear_set".format(poke_hash))
+
+            sleep(self.poke_interval)
+
+        raise AirflowSkipException('Snap. Time is OUT.')
 
     def _do_skip_downstream_tasks(self, context):
         # This function is not called in current smart sensor but related to soft_fail handle.

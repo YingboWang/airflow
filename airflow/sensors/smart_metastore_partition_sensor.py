@@ -59,7 +59,7 @@ class SmartMetastorePartitionSensor(BaseSmartOperator, MetastorePartitionSensor)
         self.task_dict = {}
 
     @provide_session
-    def init_poke_dict(self, session=None):
+    def refresh_task_dict(self, session=None):
         """
         Initiate poke dict based on operators. Need to improve for sharding big amount.
         :param operators:
@@ -126,7 +126,7 @@ class SmartMetastorePartitionSensor(BaseSmartOperator, MetastorePartitionSensor)
     @provide_session
     def poke(self, session=None):
 
-        poke_dict = self.init_poke_dict()
+        poke_dict = self.refresh_task_dict()
         self.log.info("Smart metastore partition sensor detect {} sensor tasks".format(len(poke_dict)))
         TI = models.TaskInstance
         num_landed = 0
