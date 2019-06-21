@@ -19,16 +19,14 @@
 
 
 from time import sleep
-from datetime import timedelta
 
-from airflow.exceptions import AirflowException, AirflowSensorTimeout, \
-    AirflowSkipException, AirflowRescheduleException
+from airflow.exceptions import AirflowException, AirflowSensorTimeout, AirflowSkipException
 from airflow.models import BaseOperator, TaskInstance
 from airflow.models.skipmixin import SkipMixin
 from airflow.utils import timezone
 from airflow.utils.decorators import apply_defaults
 from airflow.utils.db import provide_session
-from sqlalchemy import (Column, Index, Integer, String, and_, func, not_, or_)
+from sqlalchemy import (or_)
 from airflow.utils.state import State
 import yaml
 

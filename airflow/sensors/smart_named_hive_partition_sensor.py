@@ -27,6 +27,7 @@ from airflow.sensors.base_smart_operator import BaseSmartOperator
 from airflow.sensors.named_hive_partition_sensor import NamedHivePartitionSensor
 from airflow.utils.decorators import apply_defaults
 
+
 class SmartNamedHivePartitionSensor(BaseSmartOperator):
     """
     A persistent sensor service that talk directly to the Airflow metaDB

@@ -24,20 +24,12 @@
 
 """
 from airflow.sensors.base_smart_operator import BaseSmartOperator
-from airflow.models.skipmixin import SkipMixin
-from airflow import models
-from airflow.utils.db import provide_session
-from airflow.sensors.metastore_partition_sensor import MetastorePartitionSensor
 from airflow.utils.decorators import apply_defaults
-from airflow.utils.state import State
 from airflow.exceptions import AirflowException, AirflowSensorException
 from airflow.hooks.base_hook import BaseHook
-from sqlalchemy import (Column, Index, Integer, String, and_, func, not_, or_)
-from sqlalchemy.exc import OperationalError
-from sqlalchemy.orm.session import make_transient
-import yaml
 
-class SmartMetastorePartitionSensor(BaseSmartOperator, MetastorePartitionSensor):
+
+class SmartMetastorePartitionSensor(BaseSmartOperator):
     """
     A persistent sensor service that talk directly to the Airflow metaDB
     smart-sensor will run like a service and it periodically queries
@@ -54,121 +46,42 @@ class SmartMetastorePartitionSensor(BaseSmartOperator, MetastorePartitionSensor)
     def __init__(self,
                  *args,
                  **kwargs):
+        super(SmartMetastorePartitionSensor, self).__init__(*args, **kwargs)
         self.sensor_operator = "MetastorePartitionSensor"
-        self.poke_dict = {}
-        self.task_dict = {}
 
-    @provide_session
-    def refresh_task_dict(self, session=None):
-        """
-        Initiate poke dict based on operators. Need to improve for sharding big amount.
-        :param operators:
-        :return:
-        """
-        result = {}
-        TI = models.TaskInstance
-        tis = session.query(TI).filter(TI.operator == self.sensor_operator,
-                                       TI.state in (State.SMART_PENDING, State.SMART_RUNNING)).all()
+    def poke(self, poke_context):
+        schema = poke_context.get('schema')
+        table = poke_context.get('table')
+        partition_name = poke_context.get('partition_name')
+        conn_id = poke_context.get('conn_id')
 
-        default_info = """
-                    {partition_names: [datainfra.one_partition_per_day/ds=2019-05-18],
-                    metastore_conn_id: metastore_silver} """
-        for ti in tis:
-            persist_info = yaml.load_all(ti.attr_dict) if ti.attr_dict \
-                else yaml.load_all(default_info)
+        if '.' in table:
+            schema, table = table
+        sql = """
+        SELECT 'X'
+        FROM PARTITIONS A0
+        LEFT OUTER JOIN TBLS B0 ON A0.TBL_ID = B0.TBL_ID
+        LEFT OUTER JOIN DBS C0 ON B0.DB_ID = C0.DB_ID
+        WHERE
+            B0.TBL_NAME = '{table}' AND
+            C0.NAME = '{schema}' AND
+            A0.PART_NAME = '{partition_name}';
+        """.format(table=table, schema=schema, partition_name=partition_name)
 
-            # if conn_id in self.poke_dict:
-            #     self.poke_dict[conn_id][(schema, table, partition_name)] = \
-            #         self.poke_dict[conn_id].get((schema, table, partition_name), "waiting")
-            #
-            #     self.task_dict[(conn_id, schema, table, partition_name)][-1]\
-            #         .append((ti.dag_id, ti.task_id, ti.execution_date))
-            # else:
-            #     self.poke_dict[conn_id] = {(schema, table, partition_name): "waiting"}
+        conn = BaseHook.get_connection(conn_id)
 
-            result[(ti.dag_id, ti.task_id, ti.execution_date)] = persist_info
+        allowed_conn_type = {'google_cloud_platform', 'jdbc', 'mssql',
+                             'mysql', 'oracle', 'postgres',
+                             'presto', 'sqlite', 'vertica'}
+        if conn.conn_type not in allowed_conn_type:
+            raise AirflowException("The connection type is not supported by SqlSensor. " +
+                                   "Supported connection types: {}".format(list(allowed_conn_type)))
+        hook = conn.get_hook()
 
-            # Change task instance state to mention this is picked up by a smart sensor
-            if ti.state == State.SMART_PENDING:
-                ti.state = State.SMART_RUNNING
-                session.commit()    # Need to avoid blocking DB for big query. Can Change to use chunk later
-        return result
+        self.log.info('Poking: %s (with parameters %s)', self.sql, self.parameters)
+        records = hook.get_records(sql)
 
-    # @provide_session
-    # def poke(self, context, session=None):
-    #
-    #     TI = models.TaskInstance
-    #     self.poke_dict = self.init_poke_dict()
-    #     # Can either use MetastorePartitionSensor or directly poke from ti.attr_dict
-    #     num_landed = 0
-    #     for (dag_id, task_id, execution_date) in self.poke_dict:
-    #         conn_id, schema, table, partition_name, context = self.poke_dict[(dag_id, task_id, execution_date)]
-    #         single_sensor = MetastorePartitionSensor(table, partition_name, schema, conn_id)
-    #         try:
-    #             landed = single_sensor.poke(context)
-    #             if landed:
-    #                 ti = session.query(TI).filter_by(
-    #                     TI.dag_id == dag_id,
-    #                     TI.task_id == task_id,
-    #                     TI.execution_date == execution_date
-    #                 ).first()
-    #                 ti.state = State.SUCCESS
-    #                 session.merge(ti)
-    #                 session.commit()
-    #                 num_landed += 1
-    #
-    #         except AirflowException:
-    #             self.log.error("SmartSensor poke exception on {} dag_id = {}, task_id = {}, execution_date = {}".
-    #                            format(self.sensor_operator, dag_id, task_id, execution_date))
-    #     return len(self.poke_dict) == num_landed
+        return str(records[0][0]) not in ('0', '')
 
-
-    @provide_session
-    def poke(self, session=None):
-
-        poke_dict = self.refresh_task_dict()
-        self.log.info("Smart metastore partition sensor detect {} sensor tasks".format(len(poke_dict)))
-        TI = models.TaskInstance
-        num_landed = 0
-
-        for (dag_id, task_id, execution_date) in poke_dict:
-            conn_id, schema, table, partition_name, context = poke_dict[(dag_id, task_id, execution_date)]
-            if '.' in table:
-                schema, table = table.split('.')
-            sql = """
-            SELECT 'X'
-            FROM PARTITIONS A0
-            LEFT OUTER JOIN TBLS B0 ON A0.TBL_ID = B0.TBL_ID
-            LEFT OUTER JOIN DBS C0 ON B0.DB_ID = C0.DB_ID
-            WHERE
-                B0.TBL_NAME = '{table}' AND
-                C0.NAME = '{schema}' AND
-                A0.PART_NAME = '{partition_name}';
-            """.format(table=table, schema=schema, partition_name=partition_name)
-
-            conn = BaseHook.get_connection(conn_id)
-
-            allowed_conn_type = {'google_cloud_platform', 'jdbc', 'mssql',
-                                 'mysql', 'oracle', 'postgres',
-                                 'presto', 'sqlite', 'vertica'}
-            if conn.conn_type not in allowed_conn_type:
-                raise AirflowException("The connection type is not supported by SqlSensor. " +
-                                       "Supported connection types: {}".format(list(allowed_conn_type)))
-            hook = conn.get_hook()
-
-            self.log.info('Poking: %s (with parameters %s)', self.sql, self.parameters)
-            records = hook.get_records(sql)
-
-            if records and str(records[0][0]) not in ('0', ''):
-                num_landed += 1
-                ti = session.query(TI).filter_by(
-                    TI.dag_id == dag_id,
-                    TI.task_id == task_id,
-                    TI.execution_date == execution_date
-                ).first()
-                ti.state = State.SUCCESS
-                session.merge(ti)
-                session.commit()
-        return len(poke_dict) == num_landed
 
 
