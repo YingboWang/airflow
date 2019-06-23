@@ -26,6 +26,7 @@ from airflow.models.skipmixin import SkipMixin
 from airflow.utils import timezone
 from airflow.utils.decorators import apply_defaults
 from airflow.utils.db import provide_session
+from airflow.configuration import conf
 from sqlalchemy import (or_)
 from airflow.utils.state import State
 import yaml
@@ -33,10 +34,13 @@ import yaml
 
 class BaseSmartOperator(BaseOperator, SkipMixin):
     """
-    Sensor operators are derived from this class and inherit these attributes.
+    Smart sensor operators are derived from this class.
 
-    Sensor operators keep executing at a time interval and succeed when
-    a criteria is met and fail if and when they time out.
+    Smart Sensor operators keep refresh a dictionary by visiting DB.
+    Taking qualified active sensor tasks. Different from sensor operator,
+    Smart sensor operators poke for all sensor tasks in the dictionary at
+    a time interval. When a criteria is met or fail by time out, it update
+    all sensor task state in task_instance table
 
     :param soft_fail: Set to true to mark the task as SKIPPED on failure
     :type soft_fail: bool
@@ -66,6 +70,7 @@ class BaseSmartOperator(BaseOperator, SkipMixin):
         self.failed_hash_dict = {}
         self.clear_set = set()
         self.max_tis_per_query = 50
+        self._set_shard_range()
 
     def _validate_input_values(self):
         if not isinstance(self.poke_interval, (int, float)) or self.poke_interval < 0:
@@ -74,6 +79,13 @@ class BaseSmartOperator(BaseOperator, SkipMixin):
         if not isinstance(self.timeout, (int, float)) or self.timeout < 0:
             raise AirflowException(
                 "The timeout must be a non-negative number")
+
+    def _set_shard_range(self):
+        shard_index = int(self.task_id.split("_")[-1])
+        shard_number = conf.getint('smart_sensor', 'shard_number')
+        max_shard_all = conf.getint('smart_sensor', 'max_shard_code') + 1
+        self.shard_min = (shard_index * max_shard_all)/shard_number
+        self.shard_max = ((shard_index + 1) * max_shard_all) / shard_number
 
     @provide_session
     def refresh_task_dict(self, session=None):
@@ -86,9 +98,10 @@ class BaseSmartOperator(BaseOperator, SkipMixin):
         TI = TaskInstance
         tis = session.query(TI) \
             .filter(TI.operator == self.sensor_operator) \
-            .filter(or_(
-            TI.state == State.SMART_RUNNING,
-            TI.state == State.SMART_PENDING)) \
+            .filter(or_(TI.state == State.SMART_RUNNING,
+                        TI.state == State.SMART_PENDING))\
+            .filter(TI.shardcode < self.shard_max,
+                    TI.shardcode >= self.shard_min) \
             .all()
 
         for ti in tis:
@@ -113,7 +126,7 @@ class BaseSmartOperator(BaseOperator, SkipMixin):
         self.poked_dict = {}
         for item in self.clear_set:
             try:
-                del self.failedd_hash_dict[item]
+                del self.failed_hash_dict[item]
             except KeyError:
                 pass
         self.clear_set = set()
@@ -150,22 +163,6 @@ class BaseSmartOperator(BaseOperator, SkipMixin):
                 self.logger.exception("Exception mark_state in smart sensor: {}, hashcode: {}" \
                                       .format(str(e), poke_hash))
         self.log.info("Mark {} task to state {}".format(len(tis), state))
-
-    @provide_session
-    def set_state(self, dag_id, task_id, execution_date, state, session=None):
-        TI = TaskInstance
-        ti = session.query(TI).filter(
-            TI.dag_id == dag_id,
-            TI.task_id == task_id,
-            TI.execution_date == execution_date
-        ).one()
-        if ti and ti.state != state:
-            ti.state = state
-            ti.end_date = timezone.utcnow()
-            session.merge(ti)
-            session.commit()
-        else:
-            self.log.warning("The task instance need to be set can not be found")
 
     def execute(self, context):
         started_at = timezone.utcnow()
@@ -206,8 +203,6 @@ class BaseSmartOperator(BaseOperator, SkipMixin):
                         self.log.info("Add {} to clear_set".format(poke_hash))
 
             sleep(self.poke_interval)
-
-        raise AirflowSkipException('Snap. Time is OUT.')
 
     def _do_skip_downstream_tasks(self, context):
         # This function is not called in current smart sensor but related to soft_fail handle.

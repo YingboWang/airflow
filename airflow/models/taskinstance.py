@@ -55,6 +55,7 @@ from airflow.utils.net import get_hostname
 from airflow.utils.sqlalchemy import UtcDateTime
 from airflow.utils.state import State
 from airflow.utils.timeout import timeout
+from airflow.configuration import conf
 
 
 def clear_task_instances(tis,
@@ -145,6 +146,7 @@ class TaskInstance(Base, LoggingMixin):
     executor_config = Column(PickleType(pickler=dill))
     attr_dict = Column(Text)  # May need a different name to differentiate with executor context
     hashcode = Column(BigInteger)
+    shardcode = Column(Integer)
 
     __table_args__ = (
         Index('ti_dag_state', dag_id, state),
@@ -190,29 +192,44 @@ class TaskInstance(Base, LoggingMixin):
         self.init_on_load()
         # Prepare information for smart sensor
         self.operator = task.__class__.__name__
-        try:
-            # Consider to only render for sensor tasks so we can reduce some scheduler load.
-            self.render_templates()
-            fields = task.__class__.persist_fields if hasattr(task.__class__, 'persist_fields') else {}
-            temp_dict = {field: task.__dict__.get(field, None) for field in fields}
-            import yaml
-            self.attr_dict = yaml.safe_dump(temp_dict)
-            # Use python builtin hash for now, can be replaced by other hash functions later
-            # hashcode is for smart sensor shard and dedup.
-            self.hashcode = hash(self.attr_dict) if self.attr_dict else None
-        except Exception as e:
-            self.log.info(e)
-            self.log.info("Can not get task dictionary.")
-
+        self.init_persist_field()
         # Is this TaskInstance being currently running within `airflow run --raw`.
         # Not persisted to the database so only valid for the current process
-
         self.raw = False
 
     @reconstructor
     def init_on_load(self):
         """ Initialize the attributes that aren't stored in the DB. """
         self.test_mode = False  # can be changed when calling 'run'
+
+    def init_persist_field(self):
+        """
+        This is initialized for persist sensor poke information so the smart sensor does not need to
+        parse each sensor task in the worker side and can use the persist information to do the sensor
+        poke. Can be extended to other operator if needed. The hashcode and shardcode are created for
+        task dedup and smart sensor task sharding.
+        :return:
+        """
+        try:
+            self.render_templates()
+
+            fields = self.task.__class__.persist_fields if hasattr(self.task.__class__, 'persist_fields') else {}
+            temp_dict = {field: self.task.__dict__.get(field, None) for field in fields}
+            import yaml
+            self.attr_dict = yaml.safe_dump(temp_dict)
+
+            # Create hashcode by the persisted dictionary. Same hashcode implies duplicate sensor task
+            self.hashcode = hash(self.attr_dict) if self.attr_dict else None
+
+            # Use hashcode % base for shardcode. For better performance.
+            if conf.has_option('smart_sensor', 'max_shard_code'):
+                base = (conf.getint('smart_sensor', 'max_shard_code') + 1)
+            else:
+                base = 100000
+            self.shardcode = self.hashcode % base if self.hashcode else None
+        except Exception as e:
+            self.log.info(e)
+            self.log.info("Can not get task dictionary.")
 
     @property
     def try_number(self):

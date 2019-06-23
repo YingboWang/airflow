@@ -38,12 +38,17 @@ depends_on = None
 def upgrade():
     op.add_column('task_instance', sa.Column('attr_dict', sa.Text(), nullable=True))
     op.add_column('task_instance', sa.Column('hashcode', sa.BigInteger(), nullable=True))
+    op.add_column('task_instance', sa.Column('shardcode', sa.Integer(), nullable=True))
+
     op.create_index('ti_hashcode', 'task_instance', ['hashcode'], unique=False)
+    op.create_index('ti_shardcode', 'task_instance', ['shardcode'], unique=False)
 
 
 def downgrade():
     op.drop_index('ti_hashcode', table_name='task_instance')
+    op.drop_index('ti_shardcode', table_name='task_instance')
 
     op.drop_column('task_instance', 'attr_dict')
     op.drop_column('task_instance', 'hashcode')
+    op.drop_column('task_instance', 'shardcode')
 

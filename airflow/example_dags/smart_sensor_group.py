@@ -22,7 +22,7 @@ from datetime import timedelta
 
 import airflow
 from airflow.models import DAG
-from airflow.operators.dummy_operator import DummyOperator
+from airflow.configuration import conf
 from airflow.sensors.smart_named_hive_partition_sensor import SmartNamedHivePartitionSensor
 
 args = {
@@ -37,7 +37,9 @@ dag = DAG(
     dagrun_timeout=timedelta(minutes=60),
 )
 
-num_smart_sensor_shard = 1
+if conf.has_option('core', 'use_smart_sensor') and conf.getboolean('core', 'use_smart_sensor'):
+    num_smart_sensor_shard = conf.getint("smart_sensor", "shard_number")
+
 for i in range(num_smart_sensor_shard):
     task = SmartNamedHivePartitionSensor(
         task_id='smart_named_hive_partition_sensor_' + str(i),

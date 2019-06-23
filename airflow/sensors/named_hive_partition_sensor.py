@@ -64,7 +64,7 @@ class NamedHivePartitionSensor(BaseSensorOperator):
         self.can_use_smart = False if self.hook else True
         if self.hook and metastore_conn_id != 'metastore_default':
             self.log.warning(
-                'A hook was passed but a non defaul metastore_conn_id=%s was used', metastore_conn_id
+                'A hook was passed but a non default metastore_conn_id=%s was used', metastore_conn_id
             )
 
     @staticmethod
@@ -107,6 +107,6 @@ class NamedHivePartitionSensor(BaseSensorOperator):
         # If the task itself has callback or execution_timeout. We ignore them in smart sensor for now.
         # if this function return False the task will run as ragular sensor task. Smart sensor logic can
         # be extended to handle these in a later version.
-        if self.on_failure_callback or self.on_success_callback or self.execution_timeout:
+        if self.on_failure_callback or self.on_success_callback or self.execution_timeout or self.soft_fail:
             return False
         return self.can_use_smart
