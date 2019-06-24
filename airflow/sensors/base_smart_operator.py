@@ -27,7 +27,7 @@ from airflow.utils import timezone
 from airflow.utils.decorators import apply_defaults
 from airflow.utils.db import provide_session
 from airflow.configuration import conf
-from sqlalchemy import (or_)
+from sqlalchemy import or_
 from airflow.utils.state import State
 import yaml
 
@@ -103,6 +103,10 @@ class BaseSmartOperator(BaseOperator, SkipMixin):
             .filter(TI.shardcode < self.shard_max,
                     TI.shardcode >= self.shard_min) \
             .all()
+
+        # Query without checking dagrun state might keep some failed dag_run tasks alive. Join with DagRun table will be
+        # very slow based on the number of sensor tasks we need to handle. We query all smart tasks in this operator
+        # and expect scheduler correct the states in _change_state_for_tis_without_dagrun()
 
         for ti in tis:
             try:

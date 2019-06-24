@@ -1603,7 +1603,9 @@ class SchedulerJob(BaseJob):
                     self._change_state_for_tis_without_dagrun(simple_dag_bag,
                                                               [State.QUEUED,
                                                                State.SCHEDULED,
-                                                               State.UP_FOR_RESCHEDULE],
+                                                               State.UP_FOR_RESCHEDULE,
+                                                               State.SMART_PENDING,
+                                                               State.SMART_RUNNING],
                                                               State.NONE)
 
                     self._execute_task_instances(simple_dag_bag,
@@ -2602,7 +2604,6 @@ class LocalTaskJob(BaseJob):
             return
 
         try:
-            self.log.info("The task state is {}".format(self.task_instance.state))
             self.task_runner.start()
 
             last_heartbeat_time = time.time()
@@ -2683,4 +2684,3 @@ class LocalTaskJob(BaseJob):
             )
             self.task_runner.terminate()
             self.terminating = True
-

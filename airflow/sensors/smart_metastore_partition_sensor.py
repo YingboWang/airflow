@@ -18,11 +18,6 @@
 # under the License.
 
 
-"""
-    Query Airflow DB for all
-
-
-"""
 from airflow.sensors.base_smart_operator import BaseSmartOperator
 from airflow.utils.decorators import apply_defaults
 from airflow.exceptions import AirflowException, AirflowSensorException
@@ -36,8 +31,6 @@ class SmartMetastorePartitionSensor(BaseSmartOperator):
     task-instance table to find sensor tasks; poke the metastore and update
     the task instance table if it detects that certain partition or file
     created.
-
-
     """
 
     operator_list = ['HivePartitionSensor', 'NamedHivePartitionSensor']
@@ -82,6 +75,3 @@ class SmartMetastorePartitionSensor(BaseSmartOperator):
         records = hook.get_records(sql)
 
         return str(records[0][0]) not in ('0', '')
-
-
-

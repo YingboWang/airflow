@@ -18,11 +18,6 @@
 # under the License.
 
 
-"""
-    Query Airflow DB for all
-
-
-"""
 from airflow.sensors.base_smart_operator import BaseSmartOperator
 from airflow.sensors.named_hive_partition_sensor import NamedHivePartitionSensor
 from airflow.utils.decorators import apply_defaults
@@ -35,8 +30,6 @@ class SmartNamedHivePartitionSensor(BaseSmartOperator):
     task-instance table to find sensor tasks; poke the metastore and update
     the task instance table if it detects that certain partition or file
     created.
-
-
     """
 
     operator_type = NamedHivePartitionSensor
@@ -46,11 +39,8 @@ class SmartNamedHivePartitionSensor(BaseSmartOperator):
                  # task_id,
                  *args,
                  **kwargs):
-        # self.task_id = task_id
-
         super(SmartNamedHivePartitionSensor, self).__init__(*args, **kwargs)
         self.sensor_operator = "NamedHivePartitionSensor"
-        self.persist_fields = NamedHivePartitionSensor.persist_fields
 
     @staticmethod
     def parse_partition_name(partition):

@@ -34,7 +34,7 @@ dag = DAG(
     dag_id='smart_sensor_group',
     default_args=args,
     schedule_interval='0 0 * * *',
-    dagrun_timeout=timedelta(minutes=60),
+    # dagrun_timeout=timedelta(minutes=60),
 )
 
 if conf.has_option('core', 'use_smart_sensor') and conf.getboolean('core', 'use_smart_sensor'):
@@ -44,6 +44,9 @@ for i in range(num_smart_sensor_shard):
     task = SmartNamedHivePartitionSensor(
         task_id='smart_named_hive_partition_sensor_' + str(i),
         dag=dag,
+        retries=9999,
+        retry_delay=timedelta(seconds=30),
+        priority_weight=999,
     )
 
 if __name__ == "__main__":
