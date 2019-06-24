@@ -1506,6 +1506,7 @@ class SchedulerJob(BaseJob):
 
         # Build up a list of Python files that could contain DAGs
         self.log.info("Searching for files in %s", self.subdir)
+        # ===== Update list_py_file_paths to include smart sensor logic=======
         known_file_paths = list_py_file_paths(self.subdir)
         self.log.info("There are %s files in %s", len(known_file_paths), self.subdir)
 
@@ -1708,7 +1709,7 @@ class SchedulerJob(BaseJob):
         simple_dags = []
 
         try:
-            dagbag = models.DagBag(file_path, include_examples=False)
+            dagbag = models.DagBag(file_path, include_examples=False, use_smart_sensor=False)
         except Exception:
             self.log.exception("Failed at reloading the DAG file %s", file_path)
             Stats.incr('dag_file_refresh_error', 1, 1)
@@ -1775,12 +1776,16 @@ class SchedulerJob(BaseJob):
                     session=session,
                     verbose=True):
                 # Task starts out in the scheduled state. All tasks in the
-                # scheduled state will be sent to the executor
-                # =================smart sensor DB persist inserted here================
+                # scheduled state will be sent to the executor.
 
-                SmartSensorList = ["NamedHivePartitionSensor"]
-                if conf.has_option('core', 'use_smart_sensor') and conf.getboolean('core', 'use_smart_sensor') \
-                    and ti.can_use_smart_sensor():
+                # For tasks that should use smart sensor. Set their states to smart_pending.
+                # None of these sensor tasks will be sent to the executor. They are going to be
+                # picked up by one of the smart_sensor tasks. The smart sensor tasks will update
+                # all its sensor tasks instance states to DB.
+                if conf.has_option('core', 'use_smart_sensor') \
+                        and conf.getboolean('core', 'use_smart_sensor') \
+                        and ti.can_use_smart_sensor():
+
                     ti.state = State.SMART_PENDING
                 else:
                     ti.state = State.SCHEDULED

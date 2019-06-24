@@ -79,7 +79,8 @@ class DagBag(BaseDagBag, LoggingMixin):
             dag_folder=None,
             executor=None,
             include_examples=configuration.conf.getboolean('core', 'LOAD_EXAMPLES'),
-            safe_mode=configuration.conf.getboolean('core', 'DAG_DISCOVERY_SAFE_MODE')):
+            safe_mode=configuration.conf.getboolean('core', 'DAG_DISCOVERY_SAFE_MODE'),
+            use_smart_sensor=configuration.conf.getboolean('core', 'use_smart_sensor')):
 
         # do not use default arg in signature, to fix import cycle on plugin load
         if executor is None:
@@ -97,7 +98,8 @@ class DagBag(BaseDagBag, LoggingMixin):
         self.collect_dags(
             dag_folder=dag_folder,
             include_examples=include_examples,
-            safe_mode=safe_mode)
+            safe_mode=safe_mode,
+            use_smart_sensor=use_smart_sensor)
 
     def size(self):
         """
@@ -343,7 +345,8 @@ class DagBag(BaseDagBag, LoggingMixin):
             dag_folder=None,
             only_if_updated=True,
             include_examples=configuration.conf.getboolean('core', 'LOAD_EXAMPLES'),
-            safe_mode=configuration.conf.getboolean('core', 'DAG_DISCOVERY_SAFE_MODE')):
+            safe_mode=configuration.conf.getboolean('core', 'DAG_DISCOVERY_SAFE_MODE'),
+            use_smart_sensor=configuration.conf.getboolean('core', 'use_smart_sensor')):
         """
         Given a file path or a folder, this method looks for python modules,
         imports them and adds them to the dagbag collection.
@@ -365,7 +368,8 @@ class DagBag(BaseDagBag, LoggingMixin):
             'FileLoadStat', "file duration dag_num task_num dags")
 
         for filepath in list_py_file_paths(dag_folder, safe_mode=safe_mode,
-                                           include_examples=include_examples):
+                                           include_examples=include_examples,
+                                           use_smart_sensor=use_smart_sensor):
             try:
                 ts = timezone.utcnow()
                 found_dags = self.process_file(

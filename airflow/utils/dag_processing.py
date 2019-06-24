@@ -278,7 +278,7 @@ class SimpleDagBag(BaseDagBag):
 
 
 def list_py_file_paths(directory, safe_mode=True,
-                       include_examples=None):
+                       include_examples=None, use_smart_sensor=None):
     """
     Traverse a directory and look for Python files.
 
@@ -291,7 +291,10 @@ def list_py_file_paths(directory, safe_mode=True,
     """
     if include_examples is None:
         include_examples = conf.getboolean('core', 'LOAD_EXAMPLES')
+    if use_smart_sensor is None and conf.has_option('core', 'use_smart_sensor'):
+        use_smart_sensor = conf.getboolean('core', 'use_smart_sensor')
     file_paths = []
+
     if directory is None:
         return []
     elif os.path.isfile(directory):
@@ -352,7 +355,14 @@ def list_py_file_paths(directory, safe_mode=True,
     if include_examples:
         import airflow.example_dags
         example_dag_folder = airflow.example_dags.__path__[0]
-        file_paths.extend(list_py_file_paths(example_dag_folder, safe_mode, False))
+        file_paths.extend(list_py_file_paths(example_dag_folder, safe_mode, False, False))
+
+    if use_smart_sensor:
+        import airflow.smart_sensor_dags
+        smart_sensor_dag_folder = airflow.smart_sensor_dags.__path__[0]
+        # file_paths.extend(list_py_file_paths(smart_sensor_dag_folder, safe_mode, False, False))
+        file_paths = list_py_file_paths(smart_sensor_dag_folder, safe_mode, False, False) + file_paths
+
     return file_paths
 
 
