@@ -42,7 +42,8 @@ class NamedHivePartitionSensor(BaseSensorOperator):
 
     template_fields = ('partition_names',)
     ui_color = '#8d99ae'
-    persist_fields = ('partition_names', 'metastore_conn_id', 'poke_interval', 'hook', 'retries', 'soft_fail')
+    persist_fields = ('partition_names', 'metastore_conn_id', 'poke_interval', 'hook',
+                      'retries', 'soft_fail', 'execution_timeout', 'timeout')
 
     @apply_defaults
     def __init__(self,
@@ -107,6 +108,7 @@ class NamedHivePartitionSensor(BaseSensorOperator):
         # If the task itself has callback or execution_timeout. We ignore them in smart sensor for now.
         # if this function return False the task will run as ragular sensor task. Smart sensor logic can
         # be extended to handle these in a later version.
-        if self.on_failure_callback or self.on_success_callback or self.execution_timeout or self.soft_fail:
+        if self.on_failure_callback or self.on_success_callback or self.on_retry_callback \
+                or self.execution_timeout or self.soft_fail:
             return False
         return self.can_use_smart

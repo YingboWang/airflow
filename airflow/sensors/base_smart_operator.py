@@ -172,15 +172,15 @@ class BaseSmartOperator(BaseOperator, SkipMixin):
         started_at = timezone.utcnow()
         # while (timezone.utcnow() - started_at).total_seconds() > self.timeout:
         while True:
-            if (timezone.utcnow() - started_at).total_seconds() > self.timeout:
-                # If sensor is in soft fail mode but will be retried then
-                # give it a chance and fail with timeout.
-                # This gives the ability to set up non-blocking AND soft-fail sensors.
-                if self.soft_fail and not context['ti'].is_eligible_to_retry():
-                    self._do_skip_downstream_tasks(context)
-                    raise AirflowSkipException('Snap. Time is OUT.')
-                else:
-                    raise AirflowSensorTimeout('Snap. Time is OUT.')
+            # if (timezone.utcnow() - started_at).total_seconds() > self.timeout:
+            #     # If sensor is in soft fail mode but will be retried then
+            #     # give it a chance and fail with timeout.
+            #     # This gives the ability to set up non-blocking AND soft-fail sensors.
+            #     if self.soft_fail and not context['ti'].is_eligible_to_retry():
+            #         self._do_skip_downstream_tasks(context)
+            #         raise AirflowSkipException('Snap. Time is OUT.')
+            #     else:
+            #         raise AirflowSensorTimeout('Snap. Time is OUT.')
 
             self.log.info("Refresh all dict for smart sensor")
             self.refresh_all_dict()
@@ -188,6 +188,10 @@ class BaseSmartOperator(BaseOperator, SkipMixin):
             for key in self.task_dict:
                 poke_context, poke_hash = self.task_dict[key]
                 if poke_hash in self.poked_dict:
+                    if self.poked_dict[poke_hash] == 1:
+                        # handle timeout: should fail when exceed min(execution_timeout, timeout)
+                        # Set state to up_for_retry and add try_number, clear the task from dictionary
+                        pass
                     continue
 
                 try:
