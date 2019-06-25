@@ -237,7 +237,7 @@ class GcpStorageTransferJobCreateOperatorTest(unittest.TestCase):
     def test_job_create_gcs(self, mock_hook):
         mock_hook.return_value.create_transfer_job.return_value = VALID_TRANSFER_JOB_GCS_RAW
         body = deepcopy(VALID_TRANSFER_JOB_GCS)
-        del (body['name'])
+        del body['name']
         op = GcpTransferServiceJobCreateOperator(body=body, task_id=TASK_ID)
         result = op.execute(None)
 
@@ -255,7 +255,7 @@ class GcpStorageTransferJobCreateOperatorTest(unittest.TestCase):
             TEST_AWS_ACCESS_KEY_ID, TEST_AWS_ACCESS_SECRET, None
         )
         body = deepcopy(VALID_TRANSFER_JOB_AWS)
-        del (body['name'])
+        del body['name']
         op = GcpTransferServiceJobCreateOperator(body=body, task_id=TASK_ID)
 
         result = op.execute(None)
@@ -423,10 +423,10 @@ class GcpStorageTransferOperationListOperatorTest(unittest.TestCase):
     @mock.patch('airflow.contrib.operators.gcp_transfer_operator.GCPTransferServiceHook')
     def test_operation_list(self, mock_hook):
         mock_hook.return_value.list_transfer_operations.return_value = [VALID_TRANSFER_JOB_GCS]
-        op = GcpTransferServiceOperationsListOperator(filter=TEST_FILTER, task_id=TASK_ID)
+        op = GcpTransferServiceOperationsListOperator(request_filter=TEST_FILTER, task_id=TASK_ID)
         result = op.execute(None)
         mock_hook.assert_called_once_with(api_version='v1', gcp_conn_id='google_cloud_default')
-        mock_hook.return_value.list_transfer_operations.assert_called_once_with(filter=TEST_FILTER)
+        mock_hook.return_value.list_transfer_operations.assert_called_once_with(request_filter=TEST_FILTER)
         self.assertEqual(result, [VALID_TRANSFER_JOB_GCS])
 
     # Setting all of the operator's input parameters as templated dag_ids
@@ -439,7 +439,7 @@ class GcpStorageTransferOperationListOperatorTest(unittest.TestCase):
         args = {'start_date': DEFAULT_DATE}
         self.dag = DAG(dag_id, default_args=args)
         op = GcpTransferServiceOperationsListOperator(
-            filter={"job_names": ['{{ dag.dag_id }}']},
+            request_filter={"job_names": ['{{ dag.dag_id }}']},
             gcp_conn_id='{{ dag.dag_id }}',
             task_id='task-id',
             dag=self.dag,

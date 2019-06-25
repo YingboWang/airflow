@@ -17,11 +17,11 @@
 # specific language governing permissions and limitations
 # under the License.
 
-from sqlalchemy import Column, Integer, String, Text
+from sqlalchemy import Column, Integer, String, Text, func
 
 from airflow.models.base import Base
-from airflow.utils.db import provide_session
 from airflow.utils.state import State
+from airflow.utils.db import provide_session
 
 
 class Pool(Base):
@@ -32,8 +32,20 @@ class Pool(Base):
     slots = Column(Integer, default=0)
     description = Column(Text)
 
+    DEFAULT_POOL_NAME = 'default_pool'
+
     def __repr__(self):
         return self.pool
+
+    @staticmethod
+    @provide_session
+    def get_pool(pool_name, session=None):
+        return session.query(Pool).filter(Pool.pool == pool_name).first()
+
+    @staticmethod
+    @provide_session
+    def get_default_pool(session=None):
+        return Pool.get_pool(Pool.DEFAULT_POOL_NAME, session=session)
 
     def to_json(self):
         return {
@@ -79,6 +91,11 @@ class Pool(Base):
         """
         Returns the number of slots open at the moment
         """
-        used_slots = self.used_slots(session=session)
-        queued_slots = self.queued_slots(session=session)
-        return self.slots - used_slots - queued_slots
+        from airflow.models.taskinstance import \
+            TaskInstance as TI  # Avoid circular import
+
+        # Issue a single query instead of using the used_slots/queued_slots to
+        # avoid load on DB
+        used_slots = session.query(func.count()).filter(TI.pool == self.pool).filter(
+            TI.state.in_([State.RUNNING, State.QUEUED])).scalar()
+        return self.slots - used_slots
