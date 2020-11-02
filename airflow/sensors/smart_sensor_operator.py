@@ -89,6 +89,7 @@ class SensorWork:
         self.operator = si.operator
         self.op_classpath = si.op_classpath
         self.encoded_poke_context = si.poke_context
+        self.encoded_execution_
 
     def __eq__(self, other):
         if not isinstance(other, SensorWork):
@@ -151,7 +152,7 @@ class SensorWork:
     @property
     def cache_key(self):
         """Key used to query in smart sensor for cached sensor work."""
-        return self.operator, self.encoded_poke_context
+        return self.operator, self.encoded_poke_context, self.encoded
 
 
 class CachedPokeWork:
@@ -669,12 +670,17 @@ class SmartSensorOperator(BaseOperator, SkipMixin):
         override.
 
         """
+        # TODO: 1. change the cache_key to task signature + poke_context
+        # 2. Ignore the dedup for now
+        # 3. User task signature to construct the cached task
+        # 4. Change the poke_context to the subset of ti context.
         cached_work = self.cached_dedup_works[sensor_work.cache_key]
         if not cached_work.sensor_task:
             init_args = dict(list(sensor_work.poke_context.items())
                              + [('task_id', sensor_work.task_id)])
             operator_class = import_string(sensor_work.op_classpath)
             cached_work.sensor_task = operator_class(**init_args)
+
 
         return cached_work.sensor_task.poke(sensor_work.poke_context)
 

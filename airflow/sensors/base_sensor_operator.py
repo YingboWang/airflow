@@ -76,8 +76,8 @@ class BaseSensorOperator(BaseOperator, SkipMixin):
     # setup. Smart sensor serialize these attributes into a different DB column so
     # that smart sensor service is able to handle corresponding execution details
     # without breaking the sensor poking logic with dedup.
-    execution_fields = ('poke_interval', 'retries', 'execution_timeout', 'timeout',
-                        'email', 'email_on_retry', 'email_on_failure',)
+    smart_sensor_construct_fields = ('poke_interval', 'retries', 'execution_timeout',
+                                     'timeout', 'email', 'email_on_retry', 'email_on_failure',)
 
     @apply_defaults
     def __init__(self, *,
@@ -159,6 +159,7 @@ class BaseSensorOperator(BaseOperator, SkipMixin):
 
         poke_context_fields = getattr(self.__class__, "poke_context_fields", None)
         result = {key: getattr(self, key, None) for key in poke_context_fields}
+        # Add the context part here
         return result
 
     def get_execution_context(self, context):
@@ -172,7 +173,7 @@ class BaseSensorOperator(BaseOperator, SkipMixin):
         """
         if not context:
             self.log.info("Function get_execution_context doesn't have a context input.")
-        execution_fields = self.__class__.execution_fields
+        execution_fields = self.__class__.smart_sensor_construct_fields
 
         result = {key: getattr(self, key, None) for key in execution_fields}
         if result['execution_timeout'] and isinstance(result['execution_timeout'], datetime.timedelta):

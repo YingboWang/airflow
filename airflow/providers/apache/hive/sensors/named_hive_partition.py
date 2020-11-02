@@ -41,6 +41,8 @@ class NamedHivePartitionSensor(BaseSensorOperator):
     template_fields = ('partition_names',)
     ui_color = '#8d99ae'
     poke_context_fields = ('partition_names', 'metastore_conn_id')
+    smart_sensor_construct_fields = super().smart_sensor_construct_fields + 'metastore_conn_id' + 'partition_names'
+    ti_context_fields = ()
 
     @apply_defaults
     def __init__(
